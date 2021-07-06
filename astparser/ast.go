@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 byte-mug
+Copyright (c) 2021 Simon Schmidt
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,53 +21,53 @@ SOFTWARE.
 */
 
 
-package vm
+package astparser
 
-type Type uint
+import "github.com/byte-mug/dream/values"
+import "github.com/byte-mug/semiparse/scanlist"
+import "text/scanner"
 
 const (
-	T_Nil Type = iota
-	T_Integer
-	T_Float
-	T_String
-	T_Buffer
+	KW_min_ rune = -(100+iota)
+	KW_undef
+	KW_max_
 )
 
-type Scalar interface{
-	Type() Type
+var Keywords = scanlist.TokenDict{
+	"undef" : KW_undef,
 }
 
-type ScalarNumber interface{
-	Scalar
-	IsFloat() bool
-	Integer() int64
-	Float() float64
+type ELiteral struct {
+	Scalar values.Scalar
+	Pos scanner.Position
 }
 
-type nullt int
-func(nullt) Type() Type { return T_Nil }
-var null Scalar = nullt(0)
 
-func Null() Scalar { return null }
+type EScalar struct{ // $..
+	Name interface{} // string | expression
+	Pos scanner.Position
+}
+type EHashScalar struct{ // $..{...}
+	Name interface{} // string | expression
+	Index interface{} // string | expression
+	Pos scanner.Position
+}
+type EArrayScalar struct{ // $..[...]
+	Name interface{} // string | expression
+	Index interface{} // expression
+	Pos scanner.Position
+}
 
-type ScInt int64
-func (ScInt) Type() Type { return T_Integer }
-func (ScInt) IsFloat() bool { return false }
-func (v ScInt) Integer() int64 { return int64(v) }
-func (v ScInt) Float() float64 { return float64(v) }
-
-
-type ScFloat float64
-func (ScFloat) Type() Type { return T_Float }
-func (ScFloat) IsFloat() bool { return true }
-func (v ScFloat) Integer() int64 { return int64(v) }
-func (v ScFloat) Float() float64 { return float64(v) }
-
-type ScString string
-func (ScString) Type() Type { return T_String }
-
-type ScBuffer []byte
-func (ScBuffer) Type() Type { return T_Buffer }
+type EUnop struct{
+	Op string // operation
+	A interface{} // operand
+	Pos scanner.Position
+}
 
 
+type EBinop struct{
+	Op string // operation
+	A,B interface{} // operands
+	Pos scanner.Position
+}
 

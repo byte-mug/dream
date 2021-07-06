@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 byte-mug
+Copyright (c) 2021 Simon Schmidt
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,50 +21,42 @@ SOFTWARE.
 */
 
 
-package vm
+package allocrefl
 
-import "math"
+import "reflect"
+import "sync"
 
-func Add(a, b ScalarNumber) ScalarNumber {
-	if a.IsFloat() || b.IsFloat() {
-		return ScFloat(a.Float()+b.Float())
-	} else {
-		return ScInt(a.Integer()+b.Integer())
+const mSIZE = 10
+func findSize(siz int) uint {
+	for i := uint(0); i<mSIZE; i++ {
+		if siz <= 1<<i { return i }
 	}
+	return mSIZE
 }
 
-func Sub(a, b ScalarNumber) ScalarNumber {
-	if a.IsFloat() || b.IsFloat() {
-		return ScFloat(a.Float()-b.Float())
-	} else {
-		return ScInt(a.Integer()-b.Integer())
-	}
+type Allocator struct{
+	Sample interface{}
+	tSample reflect.Type
+	
+	pools [mSIZE]sync.Pool
 }
-
-func Mul(a, b ScalarNumber) ScalarNumber {
-	if a.IsFloat() || b.IsFloat() {
-		return ScFloat(a.Float()*b.Float())
-	} else {
-		return ScInt(a.Integer()*b.Integer())
-	}
+func (a *Allocator) init() {
+	if a.Sample==nil { panic("No specimen") }
+	if a.tSample==nil { a.tSample = reflect.TypeOf(a.Sample) }
 }
-
-func Div(a, b ScalarNumber) ScalarNumber {
-	if a.IsFloat() || b.IsFloat() {
-		return ScFloat(a.Float()/b.Float())
-	} else {
-		return ScInt(a.Integer()/b.Integer())
-	}
+func (a *Allocator) mak(size int) interface{} {
+	return reflect.MakeSlice(a.tSample,size,size).Interface()
 }
-
-func Mod(a, b ScalarNumber) ScalarNumber {
-	if a.IsFloat() || b.IsFloat() {
-		return ScFloat(math.Remainder(a.Float(),b.Float()))
-	} else {
-		return ScInt(a.Integer()%b.Integer())
-	}
+func (a *Allocator) Alloc(size int) interface{} {
+	i := findSize(size)
+	if i==mSIZE { return a.mak(size) }
+	v := a.pools[i].Get()
+	if v==nil { v = a.mak(1<<i) }
+	return v
 }
-
-
+func (a *Allocator) FreeRaw(size int, arr interface{}) {
+	i := findSize(size)
+	if i<mSIZE { a.pools[i].Put(arr) }
+}
 
 
