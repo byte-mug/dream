@@ -34,7 +34,7 @@ type ThreadState struct {
 	RS *RegisterSet
 }
 
-type InsOp func(ts *ThreadState, ip *int)
+type InsOp func(ts *ThreadState, ip *int, ln int)
 
 var sRegs = allocrefl.Allocator{ Sample: []values.Scalar{} }
 var aRegs = allocrefl.Allocator{ Sample: []values.AV{} }
@@ -59,12 +59,20 @@ func aWipe(a []values.AV) {
 //func hWipe(a []values.HV) {}
 
 
-type RSMetrics [3]int
+const (
+	RSM_Scalar = iota
+	RSM_Array
+	RSM_Hash
+	RSM_NumberOf
+)
+
+type RSMetrics [RSM_NumberOf]int
 func (rsm RSMetrics) Alloc() *RegisterSet {
 	rs := new(RegisterSet)
-	rs.SRegs = sRegs.Alloc(rsm[0]).([]values.Scalar)[:rsm[0]]
-	rs.ARegs = aRegs.Alloc(rsm[1]).([]values.AV)[:rsm[1]]
+	rs.SRegs = sRegs.Alloc(rsm[RSM_Scalar]).([]values.Scalar)[:rsm[RSM_Scalar]]
+	rs.ARegs = aRegs.Alloc(rsm[RSM_Array]).([]values.AV)[:rsm[RSM_Array]]
 	//rs.HRegs = hRegs.Alloc(rsm[2]).([]values.HV)[:rsm[2]]
+	rs.HRegs = make([]values.HV,rsm[RSM_Hash])
 	sInit(rs.SRegs)
 	return rs
 }
@@ -103,6 +111,10 @@ type ClassLoader struct{
 type Module struct{
 	Parent *ClassLoader
 	Procedures sync.Map // map[string]*Procedure
+	
+	Scalars sync.Map // map[string]*values.Scalar
+	Arrays sync.Map // map[string]*values.AV
+	Hashes sync.Map // map[string]*values.HV
 }
 
 type Procedure struct{
@@ -118,7 +130,7 @@ func (p *Procedure) Exec(ts *ThreadState) {
 	for i<n {
 		f := slice[i]
 		i++
-		f(ts,&i)
+		f(ts,&i,n)
 	}
 }
 

@@ -54,6 +54,16 @@ var Keywords = scanlist.TokenDict{
 	"ge" : KW_ge,
 }
 
+type hasPosition interface{
+	position() scanner.Position
+}
+
+func Position(i interface{}) (scanner.Position,bool) {
+	hp,_ := i.(hasPosition)
+	if hp==nil { return scanner.Position{},false }
+	return hp.position(),true
+}
+
 type ELiteral struct {
 	Scalar values.Scalar
 	Pos scanner.Position
@@ -62,12 +72,14 @@ func (e *ELiteral) String() string  {
 	if _,ok := e.Scalar.(values.ScString); ok { return fmt.Sprintf("#%q",e.Scalar) }
 	return fmt.Sprint("#",e.Scalar)
 }
+func (e *ELiteral) position() scanner.Position { return e.Pos }
 
 type EScalar struct{ // $..
 	Name interface{} // string | expression
 	Pos scanner.Position
 }
 func (e *EScalar) String() string  { return fmt.Sprint("$",e.Name) }
+func (e *EScalar) position() scanner.Position { return e.Pos }
 
 type EHashScalar struct{ // $..{...}
 	Name interface{} // string | expression
@@ -75,6 +87,7 @@ type EHashScalar struct{ // $..{...}
 	Pos scanner.Position
 }
 func (e *EHashScalar) String() string  { return fmt.Sprint("$",e.Name,"{",e.Index,"}") }
+func (e *EHashScalar) position() scanner.Position { return e.Pos }
 
 type EArrayScalar struct{ // $..[...]
 	Name interface{} // string | expression
@@ -82,6 +95,7 @@ type EArrayScalar struct{ // $..[...]
 	Pos scanner.Position
 }
 func (e *EArrayScalar) String() string  { return fmt.Sprint("$",e.Name,"[",e.Index,"]") }
+func (e *EArrayScalar) position() scanner.Position { return e.Pos }
 
 type EUnop struct{
 	Op string // operation
@@ -89,6 +103,7 @@ type EUnop struct{
 	Pos scanner.Position
 }
 func (e *EUnop) String() string  { return fmt.Sprint("(",e.Op," ",e.A,")") }
+func (e *EUnop) position() scanner.Position { return e.Pos }
 
 type EBinop struct{
 	Op string // operation
@@ -96,4 +111,12 @@ type EBinop struct{
 	Pos scanner.Position
 }
 func (e *EBinop) String() string  { return fmt.Sprint("(",e.A," ",e.Op," ",e.B,")") }
+func (e *EBinop) position() scanner.Position { return e.Pos }
+
+type EScAssign struct{
+	A,B interface{} // A := B
+	Pos scanner.Position
+}
+func (e *EScAssign) String() string  { return fmt.Sprint(e.A," = ",e.B) }
+func (e *EScAssign) position() scanner.Position { return e.Pos }
 

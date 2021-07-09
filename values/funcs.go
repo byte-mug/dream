@@ -70,6 +70,28 @@ func Concat(a, b Scalar) Scalar {
 	return ScBuffer(b.AppendTo(a.Bytes()))
 }
 
+func And(a, b Scalar) Scalar { return Bool2S(a.Bool() && b.Bool()) }
+func Or(a, b Scalar) Scalar { return Bool2S(a.Bool() && b.Bool()) }
+
+func LT(a, b Scalar) Scalar { return Bool2S(ScalarLess(a,b)) }
+func GT(a, b Scalar) Scalar { return Bool2S(ScalarLess(b,a)) }
+func LE(a, b Scalar) Scalar { return Bool2S(!ScalarLess(b,a)) }
+func GE(a, b Scalar) Scalar { return Bool2S(!ScalarLess(a,b)) }
+
+func EQ(a, b Scalar) Scalar { return Bool2S(ScalarComp(a,b)==0) }
+func NE(a, b Scalar) Scalar { return Bool2S(ScalarComp(a,b)!=0) }
+func Comp(a, b Scalar) Scalar { return ScInt(ScalarComp(a,b)) }
+
+func UPlus(a Scalar) Scalar {
+	if a.IsFloat() { return ScFloat(a.Float()) }
+	return ScInt(a.Integer())
+}
+func UMinus(a Scalar) Scalar {
+	if a.IsFloat() { return -ScFloat(a.Float()) }
+	return -ScInt(a.Integer())
+}
+func UNot(a Scalar) Scalar { return Bool2S(!a.Bool()) }
+func UBitInv(a Scalar) Scalar { return ScInt(^a.Integer()) }
 
 
 func ScalarLess(a, b Scalar) bool {

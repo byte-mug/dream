@@ -45,6 +45,7 @@ func (a *Allocator) init() {
 	if a.tSample==nil { a.tSample = reflect.TypeOf(a.Sample) }
 }
 func (a *Allocator) mak(size int) interface{} {
+	a.init()
 	return reflect.MakeSlice(a.tSample,size,size).Interface()
 }
 func (a *Allocator) Alloc(size int) interface{} {

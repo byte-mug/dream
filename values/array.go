@@ -29,6 +29,10 @@ type slotAV [1]*Scalar
 var _ ScalarSlot = &slotAV{nil}
 func (av *slotAV) Get() Scalar { return *(av[0]) }
 func (av *slotAV) Set(s Scalar) { *(av[0]) = s }
+func MakeScalarSlot(a *Scalar) ScalarSlot {
+	if a==nil { return nil }
+	return &slotAV{a}
+}
 
 //Returns the highest index of the array (such as $#array).
 func (av *AV) Len() int { return len(*av) }

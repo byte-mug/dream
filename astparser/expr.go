@@ -111,7 +111,7 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 	
 	switch tokens.Token {
 	//case scanner.Ident: return parser.ResultOk(tokens.Next(),&Expr{E_VAR,tokens.TokenText,nil,tokens.Pos})
-	case '*','+','-','!','~','&':{
+	case '+','-','!','~':{
 		sub := p.MatchNoLeftRecursion("Expr0",tokens.Next())
 		if sub.Result==parser.RESULT_OK {
 			sub.Data = &EUnop{tokens.TokenText,sub.Data,tokens.Pos}
@@ -130,12 +130,15 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 	}
 	return parser.ResultFail("Invalid Expression!",tokens.Pos)
 }
+
+
 var vbinop_single = parser.OR{
 	require('+'),
 	require('-'),
 	require('*'),
 	require('/'),
 	require('%'),
+	require('.'),
 	require(KW_and),
 	require(KW_or),
 	require(KW_eq),
@@ -150,8 +153,8 @@ var vbinop_single = parser.OR{
 var vbinop = parser.OR{
 	parser.ArraySeq{require('<'),require('=')},
 	parser.ArraySeq{require('>'),require('=')},
-	//parser.ArraySeq{require('<'),require('<')},
-	//parser.ArraySeq{require('>'),require('>')},
+	parser.ArraySeq{require('='),require('=')},
+	parser.ArraySeq{require('!'),require('=')},
 	parser.ArraySeq{vbinop_single},
 }
 
