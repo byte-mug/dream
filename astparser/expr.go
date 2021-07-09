@@ -59,6 +59,8 @@ var vssuffix = parser.OR{
 func d_vscalar(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	if tokens==nil { return parser.ResultFail("EOF!",scanner.Position{}) }
 	
+	pos := tokens.Pos
+	
 	// $
 	res1 := vssigil.Parse(p,tokens,left)
 	if !res1.Ok() { return res1 }
@@ -72,22 +74,22 @@ func d_vscalar(p *parser.Parser,tokens *scanlist.Element, left interface{}) pars
 	// Process data
 	var src interface{}
 	switch v := res1.Data.(type) {
-	case string: src = v // d_ident
+	case string: src = v // d_ident | int
 	case []interface{}: src = v[1] // long expr
 	default: src = v // short expr
 	}
-	
+	tokens = res1.Next
 	
 	// $var{SUFFIX} $var[SUFFIX]
 	res1 = vssuffix.Parse(p,tokens,left)
-	if !res1.Ok() { return parser.ResultOk(tokens.Next(), &EScalar{src,tokens.Pos}) }
+	if !res1.Ok() { return parser.ResultOk(tokens, &EScalar{src, pos}) }
 	rl := res1.Data.([]interface{})
 	switch rl[0].(string) {
-	case "{":/*}*/ return parser.ResultOk(tokens.Next(), &EHashScalar{src, rl[1] ,tokens.Pos})
-	case "[":/*]*/ return parser.ResultOk(tokens.Next(), &EArrayScalar{src, rl[1] ,tokens.Pos})
+	case "{":/*}*/ return parser.ResultOk(res1.Next, &EHashScalar{src, rl[1] ,pos})
+	case "[":/*]*/ return parser.ResultOk(res1.Next, &EArrayScalar{src, rl[1] ,pos})
 	}
 	
-	return parser.ResultFail("Invalid Scalar Expression!",tokens.Pos)
+	return parser.ResultFail("Invalid Scalar Expression!",pos)
 }
 
 func d_literal(token *scanlist.Element) interface{} {
@@ -128,13 +130,57 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 	}
 	return parser.ResultFail("Invalid Expression!",tokens.Pos)
 }
+var vbinop_single = parser.OR{
+	require('+'),
+	require('-'),
+	require('*'),
+	require('/'),
+	require('%'),
+	require(KW_and),
+	require(KW_or),
+	require(KW_eq),
+	require(KW_ne),
+	require(KW_ge),
+	require(KW_gt),
+	require(KW_le),
+	require(KW_lt),
+	require('<'),
+	require('>'),
+}
+var vbinop = parser.OR{
+	parser.ArraySeq{require('<'),require('=')},
+	parser.ArraySeq{require('>'),require('=')},
+	//parser.ArraySeq{require('<'),require('<')},
+	//parser.ArraySeq{require('>'),require('>')},
+	parser.ArraySeq{vbinop_single},
+}
 
+func d_expr0_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	if tokens==nil { return parser.ResultFail("EOF!",scanner.Position{}) }
+	
+	pos := tokens.Pos
+	
+	res1 := vbinop.Parse(p,tokens,nil)
+	if !res1.Ok() { return res1 }
+	tokens = res1.Next
+	
+	op := fmt.Sprint(res1.Data.([]interface{})...)
+	
+	res1 = p.MatchNoLeftRecursion("Expr0",tokens)
+	
+	if res1.Ok() {
+		res1.Data = &EBinop{op,left,res1.Data,pos}
+	}
+	return res1
+}
 
 
 func RegisterExpr(p *parser.Parser) {
 
 	p.Define("Vscalar",false,parser.Pfunc(d_vscalar))
+	p.Define("Expr0",false,parser.Delegate("Vscalar"))
 	p.Define("Expr0",false,parser.Pfunc(d_expr0))
+	p.Define("Expr0",true,parser.Pfunc(d_expr0_trailer))
 	
 	p.Define("Expr",false,parser.Delegate("Expr0"))
 	//p.Define("Expr",true,parser.Pfunc(c_expr_trailer0))

@@ -26,48 +26,74 @@ package astparser
 import "github.com/byte-mug/dream/values"
 import "github.com/byte-mug/semiparse/scanlist"
 import "text/scanner"
+import "fmt"
 
 const (
 	KW_min_ rune = -(100+iota)
 	KW_undef
+	KW_and
+	KW_or
+	KW_eq
+	KW_ne
+	KW_lt
+	KW_le
+	KW_gt
+	KW_ge
 	KW_max_
 )
 
 var Keywords = scanlist.TokenDict{
 	"undef" : KW_undef,
+	"and" : KW_and,
+	"or" : KW_or,
+	"eq" : KW_eq,
+	"ne" : KW_ne,
+	"lt" : KW_lt,
+	"le" : KW_le,
+	"gt" : KW_gt,
+	"ge" : KW_ge,
 }
 
 type ELiteral struct {
 	Scalar values.Scalar
 	Pos scanner.Position
 }
-
+func (e *ELiteral) String() string  {
+	if _,ok := e.Scalar.(values.ScString); ok { return fmt.Sprintf("#%q",e.Scalar) }
+	return fmt.Sprint("#",e.Scalar)
+}
 
 type EScalar struct{ // $..
 	Name interface{} // string | expression
 	Pos scanner.Position
 }
+func (e *EScalar) String() string  { return fmt.Sprint("$",e.Name) }
+
 type EHashScalar struct{ // $..{...}
 	Name interface{} // string | expression
 	Index interface{} // string | expression
 	Pos scanner.Position
 }
+func (e *EHashScalar) String() string  { return fmt.Sprint("$",e.Name,"{",e.Index,"}") }
+
 type EArrayScalar struct{ // $..[...]
 	Name interface{} // string | expression
 	Index interface{} // expression
 	Pos scanner.Position
 }
+func (e *EArrayScalar) String() string  { return fmt.Sprint("$",e.Name,"[",e.Index,"]") }
 
 type EUnop struct{
 	Op string // operation
 	A interface{} // operand
 	Pos scanner.Position
 }
-
+func (e *EUnop) String() string  { return fmt.Sprint("(",e.Op," ",e.A,")") }
 
 type EBinop struct{
 	Op string // operation
 	A,B interface{} // operands
 	Pos scanner.Position
 }
+func (e *EBinop) String() string  { return fmt.Sprint("(",e.A," ",e.Op," ",e.B,")") }
 
