@@ -32,7 +32,14 @@ This structure contains everything that is supposed to be global and thread-loca
 */
 type ThreadState struct {
 	RS *RegisterSet
+	
+	Flags uint
 }
+
+const (
+	TSF_Last uint = 1<<iota
+	TSF_Return
+)
 
 type InsOp func(ts *ThreadState, ip *int, ln int)
 
@@ -126,6 +133,16 @@ type Procedure struct{
 func (p *Procedure) Exec(ts *ThreadState) {
 	defer p.Mets.Alloc().Sproc(p).Set(ts).SetDispose(ts)
 	slice := p.Instrs
+	i,n := 0,len(slice)
+	for i<n {
+		f := slice[i]
+		i++
+		f(ts,&i,n)
+	}
+	ts.Flags &= ^TSF_Return
+}
+
+func (ts *ThreadState) RunSlice(slice []InsOp) {
 	i,n := 0,len(slice)
 	for i<n {
 		f := slice[i]

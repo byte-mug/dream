@@ -26,6 +26,7 @@ package astparser
 import "github.com/byte-mug/dream/values"
 import "github.com/byte-mug/semiparse/scanlist"
 import "text/scanner"
+import "regexp"
 import "fmt"
 
 const (
@@ -39,19 +40,33 @@ const (
 	KW_le
 	KW_gt
 	KW_ge
+	KW_m
+	KW_s
+	KW_my
+	KW_if
+	KW_unless
+	KW_while
+	KW_else
 	KW_max_
 )
 
 var Keywords = scanlist.TokenDict{
 	"undef" : KW_undef,
-	"and" : KW_and,
-	"or" : KW_or,
-	"eq" : KW_eq,
-	"ne" : KW_ne,
-	"lt" : KW_lt,
-	"le" : KW_le,
-	"gt" : KW_gt,
-	"ge" : KW_ge,
+	"and"   : KW_and,
+	"or"    : KW_or,
+	"eq"    : KW_eq,
+	"ne"    : KW_ne,
+	"lt"    : KW_lt,
+	"le"    : KW_le,
+	"gt"    : KW_gt,
+	"ge"    : KW_ge,
+	"m"     : KW_m,
+	"s"     : KW_s,
+	"my"    : KW_my,
+	"if"    : KW_if,
+	"unless": KW_unless,
+	"while" : KW_while,
+	"else"  : KW_else,
 }
 
 type hasPosition interface{
@@ -113,10 +128,78 @@ type EBinop struct{
 func (e *EBinop) String() string  { return fmt.Sprint("(",e.A," ",e.Op," ",e.B,")") }
 func (e *EBinop) position() scanner.Position { return e.Pos }
 
+type EMatchGlobal struct{
+	A interface{} // operand
+	Rx *regexp.Regexp // regexp
+	Pos scanner.Position
+}
+func (e *EMatchGlobal) String() string  { return fmt.Sprint("(",e.A," =~ m/",e.Rx,"/g)") }
+func (e *EMatchGlobal) position() scanner.Position { return e.Pos }
+
+type EMatch struct{
+	A interface{} // operand
+	Rx *regexp.Regexp // regexp
+	Pos scanner.Position
+}
+func (e *EMatch) String() string  { return fmt.Sprint("(",e.A," =~ m/",e.Rx,"/)") }
+func (e *EMatch) position() scanner.Position { return e.Pos }
+
+type EReplace struct{
+	A interface{} // operand
+	Rx *regexp.Regexp // regexp
+	B interface{} // operand (replacement)
+	Pos scanner.Position
+}
+func (e *EReplace) String() string  { return fmt.Sprint("(",e.A," =~ s/",e.Rx,"/ ",e.B,")") }
+func (e *EReplace) position() scanner.Position { return e.Pos }
+
+
 type EScAssign struct{
 	A,B interface{} // A := B
 	Pos scanner.Position
 }
 func (e *EScAssign) String() string  { return fmt.Sprint(e.A," = ",e.B) }
 func (e *EScAssign) position() scanner.Position { return e.Pos }
+
+
+type EBinopAssign struct{
+	Op string
+	A,B interface{} // A <op>= B
+	Pos scanner.Position
+}
+func (e *EBinopAssign) String() string  { return fmt.Sprint(e.A," ",e.Op,"= ",e.B) }
+func (e *EBinopAssign) position() scanner.Position { return e.Pos }
+
+
+type SMyVars struct{ // my $a,@b,%c ...
+	Vars []interface{} // variables (as string)
+	Pos scanner.Position
+}
+
+type SExpr struct{ // <expression>;
+	Expr interface{}
+	Pos scanner.Position
+}
+
+type SPrint struct { // print <expr>;
+	Expr interface{}
+	Pos scanner.Position
+}
+
+type SBlock struct{ // { ... }
+	Stmts []interface{}
+	Pos scanner.Position
+}
+
+type SCond struct{
+	Type string
+	Cond, Body interface{}
+	Pos scanner.Position
+}
+
+type SIfElse struct{
+	Type string
+	Cond, Body, Else interface{}
+	Pos scanner.Position
+}
 

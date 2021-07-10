@@ -26,6 +26,7 @@ package comp
 
 import "github.com/byte-mug/dream/values"
 import "github.com/byte-mug/dream/vm"
+import "regexp"
 import "fmt"
 
 //type vm.InsOp func(ts *vm.ThreadState, ip *int, ln int)
@@ -236,6 +237,14 @@ func binop(op binop_t, r1, r2, rT int) vm.InsOp {
 		sr[rT] = op(sr[r1],sr[r2])
 	}
 }
+func binop_assign(op binop_t, sl slotLoader, r2, rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		sr := ts.RS.SRegs
+		slot := sl(ts)
+		sr[rT] = op(slot.Get(),sr[r2])
+		slot.Set(sr[rT])
+	}
+}
 
 type unop_t func(a values.Scalar) values.Scalar
 
@@ -250,6 +259,83 @@ func unop(op unop_t, r1, rT int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		sr := ts.RS.SRegs
 		sr[rT] = op(sr[r1])
+	}
+}
+
+
+func regex_match(rx *regexp.Regexp, r1, rT int, regs []int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		sr := ts.RS.SRegs
+		vs := sr[r1]
+		sr[rT] = values.Null()
+		if vs.IsBytes() {
+			res := rx.FindSubmatch(vs.Bytes())
+			if len(res)==0 { return }
+			for i,v := range res {
+				sr[regs[i]] = values.ScBuffer(v)
+			}
+		} else {
+			res := rx.FindStringSubmatch(vs.String())
+			if len(res)==0 { return }
+			for i,v := range res {
+				sr[regs[i]] = values.ScString(v)
+			}
+		}
+		sr[rT] = values.Bool2S(true)
+	}
+}
+
+func regex_replace(rx *regexp.Regexp, r1, r2, rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		sr := ts.RS.SRegs
+		vs := sr[r1]
+		repl := sr[r2]
+		if vs.IsBytes() {
+			sr[rT] = values.ScBuffer(rx.ReplaceAll(vs.Bytes(),repl.Bytes()))
+		} else {
+			sr[rT] = values.ScString(rx.ReplaceAllString(vs.String(),repl.String()))
+		}
+	}
+}
+
+func noop(ts *vm.ThreadState, ip *int, ln int) {
+}
+func last(ts *vm.ThreadState, ip *int, ln int) {
+	ts.Flags |= vm.TSF_Last
+	*ip = ln
+}
+func next(ts *vm.ThreadState, ip *int, ln int) {
+	*ip = ln
+}
+func loop(slice []vm.InsOp) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		for {
+			ts.RunSlice(slice)
+			if (ts.Flags & vm.TSF_Last)!=0 { break }
+		}
+		ts.Flags &= ^vm.TSF_Last
+		if (ts.Flags & vm.TSF_Return)!=0 { *ip = ln }
+	}
+}
+
+func jump(off int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		*ip += off
+	}
+}
+func jump_if(off, cond int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		if ts.RS.SRegs[cond].Bool() {
+			*ip += off
+		}
+	}
+}
+
+func jump_unless(off, cond int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		if !ts.RS.SRegs[cond].Bool() {
+			*ip += off
+		}
 	}
 }
 

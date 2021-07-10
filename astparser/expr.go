@@ -28,16 +28,27 @@ import "github.com/byte-mug/dream/values"
 import "text/scanner"
 import "github.com/byte-mug/semiparse/scanlist"
 import "github.com/byte-mug/semiparse/parser"
+import "regexp"
 import "fmt"
 
+func textify(r rune) string {
+	if KW_min_>r && r>KW_max_ {
+		for v,k := range Keywords {
+			if k==r { return v }
+		}
+		return "<?>"
+	}
+	return parser.Textify(r)
+}
+
 func require(r rune) parser.ParseRule {
-	return parser.Required{ r, parser.Textify }
+	return parser.Required{ r, textify }
 }
 
 func d_ident(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	if tokens==nil { return parser.ResultFail("EOF!",scanner.Position{}) }
 	switch {
-	case tokens.Token == scanner.Ident, KW_min_<tokens.Token && tokens.Token<KW_max_:
+	case tokens.Token == scanner.Ident, KW_min_>tokens.Token && tokens.Token>KW_max_:
 		return parser.ResultOk(tokens.Next(), tokens.TokenText )
 	}
 	return parser.ResultFail("Invalid Expression!",tokens.Pos)
@@ -132,13 +143,17 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 }
 
 
-var vbinop_single = parser.OR{
+var vbinop_simple = parser.OR{
 	require('+'),
 	require('-'),
 	require('*'),
 	require('/'),
 	require('%'),
 	require('.'),
+}
+
+var vbinop_single = parser.OR{
+	vbinop_simple,
 	require(KW_and),
 	require(KW_or),
 	require(KW_eq),
@@ -177,6 +192,61 @@ func d_expr0_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}
 	return res1
 }
 
+var rxlit = parser.OR{
+	require(scanner.Char),
+	require(scanner.String),
+	require(scanner.RawString),
+}
+
+var rxtrail = parser.OR{
+	parser.ArraySeq{require('='),require('~'),require(KW_m),rxlit},
+	parser.ArraySeq{require('='),require('~'),require(KW_s),rxlit,parser.Delegate("Expr0")},
+}
+
+func d_expr1_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := rxtrail.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	rxx := res.Data.([]interface{})
+	rest := res.Next
+	
+	rxs := rxx[3].(string)
+	rxs = rxs[1:len(rxs)-1]
+	rx,err := regexp.Compile(rxs)
+	if err!=nil { return parser.ResultFail("Invalid regex: "+err.Error(),tokens.Pos) }
+	
+	
+	switch rxx[2].(string) {
+	case "m":
+		if rest.SafeTokenText()=="g" {
+			res.Next = rest.Next()
+			res.Data = &EMatchGlobal{left,rx,tokens.Pos}
+		} else {
+			res.Data = &EMatch{left,rx,tokens.Pos}
+		}
+	case "s":
+		res.Data = &EReplace{left,rx,rxx[4],tokens.Pos}
+	}
+	return res
+}
+
+var assign = parser.ArraySeq{require('='),parser.Delegate("Expr3")}
+
+func d_expr3_trailer1(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := assign.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	res.Data = &EScAssign{left,res.Data.([]interface{})[1],tokens.Pos}
+	return res
+}
+
+
+var opassign = parser.ArraySeq{vbinop_simple,require('='),parser.Delegate("Expr3")}
+
+func d_expr3_trailer2(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := opassign.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	res.Data = &EBinopAssign{res.Data.([]interface{})[0].(string),left,res.Data.([]interface{})[2],tokens.Pos}
+	return res
+}
 
 func RegisterExpr(p *parser.Parser) {
 
@@ -185,10 +255,16 @@ func RegisterExpr(p *parser.Parser) {
 	p.Define("Expr0",false,parser.Pfunc(d_expr0))
 	p.Define("Expr0",true,parser.Pfunc(d_expr0_trailer))
 	
-	p.Define("Expr",false,parser.Delegate("Expr0"))
-	//p.Define("Expr",true,parser.Pfunc(c_expr_trailer0))
+	p.Define("Expr1",false,parser.Delegate("Expr0"))
+	p.Define("Expr1",true,parser.Pfunc(d_expr1_trailer))
 	
-	//p.Define("Expr",false,parser.Pfunc(c_expr))
-	//p.Define("Expr",true,parser.Pfunc(c_expr_trailer))
+	p.Define("Expr2",false,parser.Delegate("Expr1"))
+	
+	
+	p.Define("Expr3",false,parser.Delegate("Expr2"))
+	p.Define("Expr3",true,parser.Pfunc(d_expr3_trailer1))
+	p.Define("Expr3",true,parser.Pfunc(d_expr3_trailer2))
+	
+	p.Define("Expr",false,parser.Delegate("Expr3"))
 }
 

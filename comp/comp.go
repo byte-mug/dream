@@ -26,6 +26,7 @@ package comp
 import "github.com/byte-mug/dream/astparser"
 //import "github.com/byte-mug/dream/values"
 import "github.com/byte-mug/dream/vm"
+import "regexp"
 import "fmt"
 
 type intAlloc struct {
@@ -58,6 +59,15 @@ func (ia *intAlloc) getDefined(s string) (r int,ok bool) {
 	r,ok = ia.named[s]
 	return
 }
+func (ia *intAlloc) setDefined(s string, r int) {
+	if ia.named==nil { ia.named = make(map[string]int) }
+	ia.named[s] = r
+}
+func (ia *intAlloc) doDefine(s string, sigil string) {
+	if ia.defined==nil { ia.defined = make(map[string]bool) }
+	if ia.defined[s] { panic("Varialbe already declared: "+sigil+s) }
+	ia.defined[s] = true
+}
 
 type Alloc struct {
 	RSM vm.RSMetrics
@@ -82,6 +92,16 @@ func (a *Alloc) add(t,r,c int) {
 func (a *Alloc) defined(t int,s string) (int,bool) {
 	return a.mgmt[t].getDefined(s)
 }
+func (a *Alloc) define(t int,s string, sigil string) {
+	if sigil!="" { a.mgmt[t].doDefine(s,sigil) }
+	_,ok := a.mgmt[t].getDefined(s)
+	if !ok {
+		r := a.RSM[t]
+		a.RSM[t] = r+1
+		a.mgmt[t].setDefined(s,r)
+	}
+}
+
 
 // Scalar Target Hint
 type ScTH int
@@ -106,6 +126,9 @@ func (a *Alloc) PutScTarget(sth ScTH, r int) {
 func (a *Alloc) GetScDefined(s string) (int,bool) {
 	return a.defined(vm.RSM_Scalar,s)
 }
+func (a *Alloc) SetScDefine(s string) {
+	a.define(vm.RSM_Scalar,s,"$")
+}
 // -------------------------------
 func (a *Alloc) GetArTarget(sth ScTH) int {
 	if sth<0 { return a.temp(vm.RSM_Array) }
@@ -118,6 +141,9 @@ func (a *Alloc) PutArTarget(sth ScTH, r int) {
 func (a *Alloc) GetArDefined(s string) (int,bool) {
 	return a.defined(vm.RSM_Array,s)
 }
+func (a *Alloc) SetArDefine(s string) {
+	a.define(vm.RSM_Array,s,"@")
+}
 // -------------------------------
 func (a *Alloc) GetHsTarget(sth ScTH) int {
 	if sth<0 { return a.temp(vm.RSM_Hash) }
@@ -129,6 +155,17 @@ func (a *Alloc) PutHsTarget(sth ScTH, r int) {
 }
 func (a *Alloc) GetHsDefined(s string) (int,bool) {
 	return a.defined(vm.RSM_Hash,s)
+}
+func (a *Alloc) SetHsDefine(s string) {
+	a.define(vm.RSM_Hash,s,"%")
+}
+// -------------------------------
+func (a *Alloc) MyDefine(s string) {
+	switch s[0] {
+	case '$': a.SetScDefine(s[1:])
+	case '@': a.SetArDefine(s[1:])
+	case '%': a.SetHsDefine(s[1:])
+	}
 }
 // -------------------------------
 func compileArrayLoader(alloc *Alloc, name interface{}, w bool) (ops []vm.InsOp, al arrayLoader, reg int) {
@@ -171,25 +208,28 @@ func scTarget(alloc *Alloc, targ, src interface{}, sth ScTH) (ops []vm.InsOp,reg
 				if reg!=r3 { ops = append(ops,scalar_move(r3,reg)) }
 				return
 			}
-			ops,reg = ScCompile(alloc,src,sth)
+			ops,reg = ScCompile(alloc,src,sth.DeferDiscard())
 			ops = append(ops,store_global(str,reg))
+			alloc.PutScTarget(sth,reg)
 		} else {
 			o1,r1 := ScCompile(alloc,t.Name,ScAny)
 			
-			ops,reg = ScCompile(alloc,src,sth)
+			ops,reg = ScCompile(alloc,src,sth.DeferDiscard())
 			ops = append(o1,ops...)
 			ops = append(ops,store_unref(r1,reg))
 			alloc.PutScTarget(ScDiscard,r1)
+			alloc.PutScTarget(sth,reg)
 		}
 	case *astparser.EHashScalar:
 		o1,al,r1 := compileHashLoader(alloc,t.Name,true)
 		o2,r2 := ScCompile(alloc,t.Index,ScAny)
 		o1 = append(o1,o2...)
-		ops,reg = ScCompile(alloc,src,sth)
+		ops,reg = ScCompile(alloc,src,sth.DeferDiscard())
 		ops = append(o1,ops...)
 		ops = append(ops,store_hash(al,r2,reg))
 		alloc.PutScTarget(ScDiscard,r1)
 		alloc.PutScTarget(ScDiscard,r2)
+		alloc.PutScTarget(sth,reg)
 	case *astparser.EArrayScalar:
 		o1,al,r1 := compileArrayLoader(alloc,t.Name,true)
 		o2,r2 := ScCompile(alloc,t.Index,ScAny)
@@ -204,13 +244,13 @@ func scTarget(alloc *Alloc, targ, src interface{}, sth ScTH) (ops []vm.InsOp,reg
 		if ok {
 			panic(fmt.Errorf("%v : Can't assign to %v",pos,targ))
 		} else {
-			panic(fmt.Errorf("Can't assign to %v",pos,targ))
+			panic(fmt.Errorf("Can't assign to %v",targ))
 		}
 	}
 	
 	return
 }
-func scUpdate(alloc *Alloc, ast interface{}) (ops []vm.InsOp, sl slotLoader,regs []int) {
+func scUpdate(alloc *Alloc, ast interface{}, try bool) (ops []vm.InsOp, sl slotLoader,regs []int) {
 	var reg int
 	switch t := ast.(type) {
 	case *astparser.EScalar:
@@ -242,17 +282,27 @@ func scUpdate(alloc *Alloc, ast interface{}) (ops []vm.InsOp, sl slotLoader,regs
 		sl = slot_array(al,r2)
 		regs = []int{r1,r2}
 	default:
+		if try { return nil,nil,nil }
 		pos,ok := astparser.Position(ast)
 		if ok {
 			panic(fmt.Errorf("%v : Can't slot-assign to %v",pos,ast))
 		} else {
-			panic(fmt.Errorf("Can't slot-assign to %v",pos,ast))
+			panic(fmt.Errorf("Can't slot-assign to %v",ast))
 		}
 	}
 	
 	return
 }
-
+func allocNumbers(alloc *Alloc, rx *regexp.Regexp) (regs []int) {
+	n := rx.NumSubexp()+1
+	regs = make([]int,n)
+	for i := 0; i<n; i++ {
+		S := fmt.Sprint(i)
+		alloc.define(vm.RSM_Scalar,S,"")
+		regs[i],_ = alloc.GetScDefined(S)
+	}
+	return
+}
 
 func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int) {
 	switch t := ast.(type) {
@@ -314,12 +364,105 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 		alloc.PutScTarget(ScDiscard,r1)
 		alloc.PutScTarget(ScDiscard,r2)
 		alloc.PutScTarget(sth,reg)
+	case *astparser.EMatchGlobal:
+		panic(fmt.Errorf("%v Unsupported: %v",t.Pos,ast))
+	case *astparser.EMatch:
+		o1,r1 := ScCompile(alloc,t.A,ScAny)
+		regs := allocNumbers(alloc,t.Rx)
+		reg = alloc.GetScTarget(sth)
+		ops = o1
+		ops = append(ops,regex_match(t.Rx,r1,reg,regs))
+		alloc.PutScTarget(ScDiscard,r1)
+		alloc.PutScTarget(sth,reg)
+	case *astparser.EReplace:
+		o1,r1 := ScCompile(alloc,t.A,ScAny)
+		o2,r2 := ScCompile(alloc,t.B,ScAny)
+		reg = alloc.GetScTarget(sth)
+		ops = append(o1,o2...)
+		ops = append(ops,regex_replace(t.Rx,r1,r2,reg))
+		alloc.PutScTarget(ScDiscard,r1)
+		alloc.PutScTarget(ScDiscard,r2)
+		alloc.PutScTarget(sth,reg)
 	case *astparser.EScAssign:
 		return scTarget(alloc,t.A,t.B,sth)
+	case *astparser.EBinopAssign:
+		op,ok := binop_map[t.Op]
+		if !ok { panic(t.Pos.String()+" Binary Operation not supported: "+t.Op) }
+		o1,sl,regs := scUpdate(alloc,t.A,false)
+		o2,r2 := ScCompile(alloc,t.B,ScAny)
+		regs = append(regs,r2)
+		ops = append(o1,o2...)
+		reg = alloc.GetScTarget(sth)
+		ops = append(ops,binop_assign(op,sl,r2,reg))
+		for _,oreg := range regs { alloc.PutScTarget(ScDiscard,oreg) }
+		alloc.PutScTarget(sth,reg)
 	default:
-		panic("...")
+		pos,ok := astparser.Position(ast)
+		if ok {
+			panic(fmt.Errorf("%v : Expression not supported : %v",pos,ast))
+		} else {
+			panic(fmt.Errorf("Expression not supported : %v",ast))
+		}
 	}
 	
+	return
+}
+
+func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
+	switch t := ast.(type) {
+	case *astparser.SMyVars:
+		for _,s := range t.Vars { alloc.MyDefine(s.(string)) }
+	case *astparser.SExpr:
+		ops,_ = ScCompile(alloc,t.Expr,ScDiscard)
+	case *astparser.SBlock:
+		for _,s := range t.Stmts {
+			o := StmtCompile(alloc,s)
+			ops = append(ops,o...)
+		}
+	case *astparser.SCond:
+		o1,r1 := ScCompile(alloc,t.Cond,ScAny)
+		alloc.PutScTarget(ScDiscard,r1)
+		o2 := StmtCompile(alloc,t.Body)
+		switch t.Type {
+		case "if":
+			ops = append(o1,jump_unless(len(o2),r1))
+			ops = append(ops,o2...)
+		case "unless":
+			ops = append(o1,jump_if(len(o2),r1))
+			ops = append(ops,o2...)
+		case "while":
+			slice := append(o1,jump_if(1,r1),last)
+			slice = append(slice,o2...)
+			ops = append(ops,loop(slice))
+		}
+		ops = append(ops,noop)
+	case *astparser.SIfElse:
+		o1,r1 := ScCompile(alloc,t.Cond,ScAny)
+		alloc.PutScTarget(ScDiscard,r1)
+		o2 := StmtCompile(alloc,t.Body)
+		o3 := StmtCompile(alloc,t.Else)
+		switch t.Type {
+		case "if":
+			ops = append(o1,jump_unless(len(o2)+1,r1))
+			ops = append(ops,o2...)
+		case "unless":
+			ops = append(o1,jump_if(len(o2)+1,r1))
+			ops = append(ops,o2...)
+		}
+		ops = append(ops,jump(len(o3)))
+		ops = append(ops,o3...)
+	case *astparser.SPrint:
+		o1,r1 := ScCompile(alloc,t.Expr,ScAny)
+		alloc.PutScTarget(ScDiscard,r1)
+		ops = append(o1,debug(r1)) // TODO: replace debug
+	default:
+		pos,ok := astparser.Position(ast)
+		if ok {
+			panic(fmt.Errorf("%v : Statement not supported : %v",pos,ast))
+		} else {
+			panic(fmt.Errorf("Statement not supported : %v",ast))
+		}
+	}
 	return
 }
 
@@ -329,11 +472,9 @@ func TestFunc(ast interface{}) (res *vm.Procedure) {
 	
 	alloc := new(Alloc)
 	
-	var reg int
-	res.Instrs,reg = ScCompile(alloc,ast,ScDiscard)
+	res.Instrs = StmtCompile(alloc,ast)
 	res.Mets = alloc.RSM
 	
-	res.Instrs = append(res.Instrs,debug(reg))
 	return
 }
 
