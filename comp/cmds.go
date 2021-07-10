@@ -79,6 +79,68 @@ func slot_local(reg int) slotLoader {
 	}
 }
 
+func load_array_global(n string, reg int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		rs := ts.RS
+		v,ok := rs.Proc.Parent.Arrays.Load(n)
+		if ok {
+			rs.ARegs[reg] = append(rs.ARegs[reg],*(v.(*values.AV))...)
+		} else {
+			rs.ARegs[reg] = rs.ARegs[reg][:0]
+		}
+	}
+}
+func store_array_global(n string, reg int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		rs := ts.RS
+		v,ok := rs.Proc.Parent.Arrays.Load(n)
+		if ok {
+			av := v.(*values.AV)
+			*av = append((*av)[:0],rs.ARegs[reg]...)
+		}
+	}
+}
+func load_array_unref(r1,rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		sr := ts.RS.SRegs
+		ar := ts.RS.ARegs
+		ar[rT] = append(ar[rT][:0],*(sr[r1].(*values.ScReference).Data.(*values.AV))...)
+	}
+}
+func store_array_unref(r1,rSrc int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		sr := ts.RS.SRegs
+		ar := ts.RS.ARegs
+		av := sr[r1].(*values.ScReference).Data.(*values.AV)
+		*av = append((*av)[:0],ar[rSrc]...)
+	}
+}
+func load_array_args(rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ar := ts.RS.ARegs
+		ar[rT] = ts.Args
+	}
+}
+func commit_array_args(rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ar := ts.RS.ARegs
+		ts.Args = ar[rT]
+	}
+}
+func store_array_args(r1 int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ar := ts.RS.ARegs
+		ts.Args = append(ts.Args[:0],ar[r1]...)
+	}
+}
+func move_array(r1,rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ar := ts.RS.ARegs
+		ar[rT] = append(ar[rT][:0],ar[r1]...)
+	}
+}
+
+
 func load_unref(r1,rT int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		sr := ts.RS.SRegs
@@ -144,6 +206,24 @@ func hvunref(reg int) hashLoader {
 	return func(ts *vm.ThreadState) *values.HV { return ts.RS.SRegs[reg].(*values.ScReference).Data.(*values.HV) }
 }
 
+// arrayLoader
+func avargs(ts *vm.ThreadState) *values.AV { return &(ts.Args) }
+
+func hash_to_array(hl hashLoader, rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		avp := hl(ts).ToAV()
+		ts.RS.ARegs[rT] = *avp
+	}
+}
+
+func hash_from_array(hl hashLoader, rSrc int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		hv := hl(ts)
+		hv.Clear()
+		hv.FromAV(&ts.RS.ARegs[rSrc])
+	}
+}
+
 func load_array(al arrayLoader, r1, rT int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		av := al(ts)
@@ -167,6 +247,7 @@ func slot_array(al arrayLoader, r1 int) slotLoader {
 		return av.StoreSlot(scrg[r1].Integer())
 	}
 }
+
 func load_hash(hl hashLoader, r1, rT int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		hv := hl(ts)

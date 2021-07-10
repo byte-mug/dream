@@ -67,6 +67,12 @@ func d_stmtsub_expr(p *parser.Parser,tokens *scanlist.Element, left interface{})
 	if res.Ok() { res.Data = &SExpr{res.Data,tokens.Pos} }
 	return res
 }
+func d_stmtsub_array(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := p.Match("Array",tokens)
+	if res.Ok() { res.Data = &SArray{res.Data,tokens.Pos} }
+	return res
+}
+
 var stmtsub_print = parser.LSeq{
 	parser.RequireText{"print"},
 	parser.Delegate("Expr"),
@@ -143,6 +149,7 @@ func RegisterStmt(p *parser.Parser) {
 	p.Define("Decl",false,parser.Pfunc(d_decl_myvar))
 	
 	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_expr))
+	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_array))
 	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_print))
 	p.Define("StmtSub",true,parser.Pfunc(d_stmtsub_cond))
 	

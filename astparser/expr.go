@@ -129,6 +129,12 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 		}
 		return sub
 	    }
+	case KW_scalar:{
+		sub := p.MatchNoLeftRecursion("Array",tokens.Next())
+		if sub.Ok() {
+			sub.Data = &EFromArray{sub.Data,tokens.Pos}
+		}
+	    }
 	case '(': /*)*/{
 		sub := p.Match("Expr",tokens.Next())
 		if sub.Result==parser.RESULT_OK {
@@ -248,6 +254,35 @@ func d_expr3_trailer2(p *parser.Parser,tokens *scanlist.Element, left interface{
 	return res
 }
 
+var vasigil = parser.OR{ require('@'), require('%') }
+var vaname = parser.OR{
+	parser.Pfunc(d_ident),
+	require(scanner.Int),
+	parser.Delegate("Vscalar"),
+	parser.ArraySeq{require('{'), parser.Delegate("Expr"), require('}')},
+}
+var vacomplete = parser.ArraySeq{ vasigil,vaname }
+
+func d_array_variable(p *parser.Parser, tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := vacomplete.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	
+	list := res.Data.([]interface{})
+	switch list[0].(string) {
+	case "@": res.Data = &AArray{list[1],tokens.Pos}
+	case "%": res.Data = &AHash{list[1],tokens.Pos}
+	}
+	
+	return res
+}
+
+var va_assign = parser.LSeq{require('='),parser.Delegate("Array0")}
+func d_array_assign(p *parser.Parser, tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := va_assign.Parse(p,tokens,nil)
+	if res.Ok() { res.Data = &AArAssign{left,res.Data,tokens.Pos} }
+	return res
+}
+
 func RegisterExpr(p *parser.Parser) {
 
 	p.Define("Vscalar",false,parser.Pfunc(d_vscalar))
@@ -266,5 +301,12 @@ func RegisterExpr(p *parser.Parser) {
 	p.Define("Expr3",true,parser.Pfunc(d_expr3_trailer2))
 	
 	p.Define("Expr",false,parser.Delegate("Expr3"))
+	
+	// ----------------------- Array ----------------------
+	
+	p.Define("Array0",false,parser.Pfunc(d_array_variable))
+	p.Define("Array0",true,parser.Pfunc(d_array_assign))
+	
+	p.Define("Array",false,parser.Delegate("Array0"))
 }
 

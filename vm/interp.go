@@ -33,6 +33,8 @@ This structure contains everything that is supposed to be global and thread-loca
 type ThreadState struct {
 	RS *RegisterSet
 	
+	Args values.AV // @_
+	
 	Flags uint
 }
 

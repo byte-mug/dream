@@ -112,6 +112,14 @@ func (hv *HV) FromAV(av *AV) {
 		}
 	}
 }
+func (hv *HV) Clear(){
+	var res = make([]interface{},0,16)
+	hv.Map.Range(func(key, value interface{}) bool{
+		res = append(res,key)
+		return true
+	})
+	for _,k := range res { hv.Map.Delete(k) }
+}
 
 
 func Hv_Index(ref, idx Scalar) Scalar {

@@ -47,6 +47,7 @@ const (
 	KW_unless
 	KW_while
 	KW_else
+	KW_scalar
 	KW_max_
 )
 
@@ -67,6 +68,7 @@ var Keywords = scanlist.TokenDict{
 	"unless": KW_unless,
 	"while" : KW_while,
 	"else"  : KW_else,
+	"scalar": KW_scalar,
 }
 
 type hasPosition interface{
@@ -77,6 +79,10 @@ func Position(i interface{}) (scanner.Position,bool) {
 	hp,_ := i.(hasPosition)
 	if hp==nil { return scanner.Position{},false }
 	return hp.position(),true
+}
+
+type arrayExpr interface{
+	array()
 }
 
 type ELiteral struct {
@@ -135,6 +141,7 @@ type EMatchGlobal struct{
 }
 func (e *EMatchGlobal) String() string  { return fmt.Sprint("(",e.A," =~ m/",e.Rx,"/g)") }
 func (e *EMatchGlobal) position() scanner.Position { return e.Pos }
+func (e *EMatchGlobal) array() {}
 
 type EMatch struct{
 	A interface{} // operand
@@ -170,6 +177,38 @@ type EBinopAssign struct{
 func (e *EBinopAssign) String() string  { return fmt.Sprint(e.A," ",e.Op,"= ",e.B) }
 func (e *EBinopAssign) position() scanner.Position { return e.Pos }
 
+type EFromArray struct{
+	Array interface{}
+	Pos scanner.Position
+}
+func (e *EFromArray) String() string { return fmt.Sprint(e.Array) }
+func (e *EFromArray) position() scanner.Position { return e.Pos }
+
+type AArray struct{ // @..
+	Name interface{} // string | expression
+	Pos scanner.Position
+}
+func (e *AArray) String() string  { return fmt.Sprint("@",e.Name) }
+func (e *AArray) position() scanner.Position { return e.Pos }
+func (e *AArray) array() {}
+
+type AHash struct{ // %..
+	Name interface{} // string | expression
+	Pos scanner.Position
+}
+func (e *AHash) String() string  { return fmt.Sprint("@",e.Name) }
+func (e *AHash) position() scanner.Position { return e.Pos }
+func (e *AHash) array() {}
+
+type AArAssign struct{
+	A,B interface{} // A := B
+	Pos scanner.Position
+}
+func (e *AArAssign) String() string  { return fmt.Sprint(e.A," = ",e.B) }
+func (e *AArAssign) position() scanner.Position { return e.Pos }
+func (e *AArAssign) array() {}
+
+
 
 type SMyVars struct{ // my $a,@b,%c ...
 	Vars []interface{} // variables (as string)
@@ -180,6 +219,12 @@ type SExpr struct{ // <expression>;
 	Expr interface{}
 	Pos scanner.Position
 }
+
+type SArray struct{ // <expression>;
+	Expr interface{}
+	Pos scanner.Position
+}
+
 
 type SPrint struct { // print <expr>;
 	Expr interface{}

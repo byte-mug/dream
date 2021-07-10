@@ -24,7 +24,7 @@ SOFTWARE.
 package comp
 
 import "github.com/byte-mug/dream/astparser"
-//import "github.com/byte-mug/dream/values"
+import "github.com/byte-mug/dream/values"
 import "github.com/byte-mug/dream/vm"
 import "regexp"
 import "fmt"
@@ -103,7 +103,9 @@ func (a *Alloc) define(t int,s string, sigil string) {
 }
 
 
-// Scalar Target Hint
+// Scalar Target Hint +
+// Array Target Hint +
+// Hash Target Hint
 type ScTH int
 const (
 	ScAny ScTH = -(1+iota)
@@ -170,6 +172,7 @@ func (a *Alloc) MyDefine(s string) {
 // -------------------------------
 func compileArrayLoader(alloc *Alloc, name interface{}, w bool) (ops []vm.InsOp, al arrayLoader, reg int) {
 	if str,ok := name.(string); ok {
+		if str=="_" { return nil,avargs,-1 }
 		if areg,ok := alloc.GetArDefined(str); ok {
 			return nil,avlocal(areg),-1
 		}
@@ -234,11 +237,12 @@ func scTarget(alloc *Alloc, targ, src interface{}, sth ScTH) (ops []vm.InsOp,reg
 		o1,al,r1 := compileArrayLoader(alloc,t.Name,true)
 		o2,r2 := ScCompile(alloc,t.Index,ScAny)
 		o1 = append(o1,o2...)
-		reg = alloc.GetScTarget(sth)
+		ops,reg = ScCompile(alloc,src,sth.DeferDiscard())
 		ops = append(o1,ops...)
 		ops = append(ops,store_array(al,r2,reg))
 		alloc.PutScTarget(ScDiscard,r1)
 		alloc.PutScTarget(ScDiscard,r2)
+		alloc.PutScTarget(sth,reg)
 	default:
 		pos,ok := astparser.Position(targ)
 		if ok {
@@ -309,6 +313,10 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 	case *astparser.ELiteral:
 		reg = alloc.GetScTarget(sth)
 		ops = append(ops,literal(t.Scalar,reg))
+		alloc.PutScTarget(sth,reg)
+	case string:
+		reg = alloc.GetScTarget(sth)
+		ops = append(ops,literal(values.ScString(t),reg))
 		alloc.PutScTarget(sth,reg)
 	case *astparser.EScalar:
 		if str,ok := t.Name.(string); ok {
@@ -407,6 +415,86 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 	
 	return
 }
+func arAssign(alloc *Alloc, targ, src interface{}, sth ScTH) (ops []vm.InsOp, reg int) {
+	switch t := targ.(type) {
+	case *astparser.AArray:
+		if str,ok := t.Name.(string); ok {
+			if str=="_" {
+				ops,reg = ArCompile(alloc,src,sth.DeferDiscard())
+				ops = append(ops,store_array_args(reg))
+				alloc.PutArTarget(sth,reg)
+				return
+			}
+			if reg,ok = alloc.GetArDefined(str); ok {
+				o1,r1 := ArCompile(alloc,src,ScTH(reg))
+				if r1!=reg {
+					o1 = append(o1,move_array(r1,reg))
+				}
+				ops = o1
+				return
+			}
+			ops,reg = ArCompile(alloc,src,sth.DeferDiscard())
+			ops = append(ops,store_array_global(str,reg))
+			alloc.PutArTarget(sth,reg)
+		} else {
+			o1,r1 := ScCompile(alloc,t.Name,ScAny)
+			ops,reg = ArCompile(alloc,src,sth.DeferDiscard())
+			ops = append(o1,ops...)
+			ops = append(ops,store_array_unref(r1,reg))
+			alloc.PutScTarget(ScDiscard,r1)
+			alloc.PutArTarget(sth,reg)
+		}
+	case *astparser.AHash:
+		o1,al,r1 := compileHashLoader(alloc,t.Name,false)
+		ops,reg = ArCompile(alloc,src,sth.DeferDiscard())
+		ops = append(ops,o1...)
+		ops = append(ops,hash_from_array(al,reg))
+		alloc.PutScTarget(ScDiscard,r1)
+		alloc.PutArTarget(sth,reg)
+	default:
+		pos,ok := astparser.Position(targ)
+		if ok {
+			panic(fmt.Errorf("%v : Can't assign to %v",pos,targ))
+		} else {
+			panic(fmt.Errorf("Can't assign to %v",targ))
+		}
+	}
+	return
+}
+func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int) {
+	switch t := ast.(type) {
+	case *astparser.AArray:
+		if str,ok := t.Name.(string); ok {
+			if reg,ok = alloc.GetArDefined(str); ok { return }
+			reg = alloc.GetArTarget(sth)
+			ops = append(ops,load_array_global(str,reg))
+			alloc.PutArTarget(sth,reg)
+		} else {
+			o1,r1 := ScCompile(alloc,t.Name,ScAny)
+			reg = alloc.GetArTarget(sth)
+			ops = o1
+			ops = append(ops,load_array_unref(r1,reg))
+			alloc.PutScTarget(ScDiscard,r1)
+			alloc.PutArTarget(sth,reg)
+		}
+	case *astparser.AHash:
+		o1,al,r1 := compileHashLoader(alloc,t.Name,false)
+		reg = alloc.GetArTarget(sth)
+		ops = append(o1,hash_to_array(al,reg))
+		alloc.PutScTarget(ScDiscard,r1)
+		alloc.PutArTarget(sth,reg)
+	case *astparser.AArAssign:
+		ops,reg = arAssign(alloc,t.A,t.B,sth)
+	default:
+		pos,ok := astparser.Position(ast)
+		if ok {
+			panic(fmt.Errorf("%v : Statement not supported : %v",pos,ast))
+		} else {
+			panic(fmt.Errorf("Statement not supported : %v",ast))
+		}
+	}
+	return
+}
 
 func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 	switch t := ast.(type) {
@@ -414,6 +502,8 @@ func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 		for _,s := range t.Vars { alloc.MyDefine(s.(string)) }
 	case *astparser.SExpr:
 		ops,_ = ScCompile(alloc,t.Expr,ScDiscard)
+	case *astparser.SArray:
+		ops,_ = ArCompile(alloc,t.Expr,ScDiscard)
 	case *astparser.SBlock:
 		for _,s := range t.Stmts {
 			o := StmtCompile(alloc,s)
