@@ -30,6 +30,7 @@ import "text/scanner"
 import "github.com/byte-mug/semiparse/scanlist"
 import "github.com/byte-mug/semiparse/parser"
 import "regexp"
+import "strings"
 import "fmt"
 
 func textify(r rune) string {
@@ -54,6 +55,25 @@ func d_ident(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 	}
 	return parser.ResultFail("Invalid Expression!",tokens.Pos)
 }
+
+var module_name_sep = parser.LSeq{require(':'),require(':')}
+var module_name = parsex.ArrayDelimited{parser.Pfunc(d_ident),module_name_sep}
+func d_module_name(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := module_name.Parse(p,tokens,left)
+	if !res.Ok() { return res }
+	
+	arr := res.Data.([]interface{})
+	var sobj strings.Builder
+	for i,elem := range arr {
+		if i>0 { sobj.WriteString("::") }
+		sobj.WriteString(elem.(string))
+	}
+	res.Data = sobj.String()
+	
+	return res
+}
+var module_name_guess = parser.LSeq{parser.Pfunc(d_ident),require(':'),require(':')}
+
 
 var vssigil = require('$')
 var vsprefix = parser.OR{
@@ -106,6 +126,7 @@ func d_vscalar(p *parser.Parser,tokens *scanlist.Element, left interface{}) pars
 
 func d_literal(token *scanlist.Element) interface{} {
 	var lit values.Scalar = nil
+	if ok,_ := parser.FastMatch(token,KW_undef,':',':'); ok { return nil }
 	switch token.Token {
 	case KW_undef: lit = values.Null()
 	case scanner.Int: i,_ := strconv.ParseInt(token.TokenText, 0, 64); lit = values.ScInt(i)
@@ -116,10 +137,17 @@ func d_literal(token *scanlist.Element) interface{} {
 	return &ELiteral{lit, token.Pos}
 }
 
+func d_expr0_module_name(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := d_module_name(p,tokens,left)
+	if res.Ok() { res.Data = &EModule{res.Data.(string),tokens.Pos} }
+	return res
+}
+
 func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	if tokens==nil { return parser.ResultFail("EOF!",scanner.Position{}) }
-	if obj := d_literal(tokens); obj!=nil { return parser.ResultOk(tokens.Next(),obj) }
+	if module_name_guess.Parse(p,tokens,nil).Ok() { return d_expr0_module_name(p,tokens,left) }
 	
+	if obj := d_literal(tokens); obj!=nil { return parser.ResultOk(tokens.Next(),obj) }
 	
 	switch tokens.Token {
 	//case scanner.Ident: return parser.ResultOk(tokens.Next(),&Expr{E_VAR,tokens.TokenText,nil,tokens.Pos})
@@ -143,8 +171,35 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 	return parser.ResultFail("Invalid Expression!",tokens.Pos)
 }
 
-var vsexlist = parsex.ArrayDelimited{
+
+var vsexlist_kv = parser.ArraySeq{
+	parser.OR{
+		parser.Pfunc(d_ident),
+		parsex.DelegateShort("Expr3"),
+	},
+	require('='),
+	require('>'),
 	parsex.DelegateShort("Expr3"),
+}
+
+func d_exlist_kv(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := vsexlist_kv.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	
+	arr := res.Data.([]interface{})
+	
+	res.Data = &AConcat{[]interface{}{arr[0],arr[3]},tokens.Pos}
+	
+	return res
+}
+
+var vsexlist_elem = parser.OR{
+	parser.Pfunc(d_exlist_kv),
+	parsex.DelegateShort("Expr3"),
+}
+
+var vsexlist = parsex.ArrayDelimited{
+	vsexlist_elem,
 	require(','),
 }
 
@@ -161,6 +216,10 @@ func d_expr0_ref(p *parser.Parser,tokens *scanlist.Element, left interface{}) pa
 	if !res.Ok() { return res }
 	
 	arr := res.Data.([]interface{})
+	
+	// Avoid cascading *AConcat objects!
+	arr = flatten_one_level(arr)
+	
 	var elems []interface{}
 	if len(arr)==3 { elems = arr[1].([]interface{}) }
 	switch arr[0].(string) {
@@ -221,6 +280,7 @@ func d_expr0_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}
 	return res1
 }
 
+
 var rxlit = parser.OR{
 	require(scanner.Char),
 	require(scanner.String),
@@ -255,6 +315,27 @@ func d_expr1_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}
 	case "s":
 		res.Data = &EReplace{left,rx,rxx[4],tokens.Pos}
 	}
+	return res
+}
+
+var exprifelse = parser.ArraySeq{
+	require('?'),
+	parsex.Snip{parser.Delegate("Expr")},
+	parsex.Snip{require(':')},
+	parsex.Snip{parser.Delegate("Expr")},
+}
+
+func d_expr2_ifelse(p *parser.Parser, tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := exprifelse.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	list := res.Data.([]interface{})
+	
+	if IsArrayExpr(list[1]) || IsArrayExpr(list[3]) {
+		res.Data = &AExIfElse{left,list[1],list[3],tokens.Pos}
+	} else {
+		res.Data = &EExIfElse{left,list[1],list[3],tokens.Pos}
+	}
+	
 	return res
 }
 
@@ -318,6 +399,7 @@ func RegisterExpr(p *parser.Parser) {
 	p.Define("Expr1",true,parser.Pfunc(d_expr1_trailer))
 	
 	p.Define("Expr2",false,parser.Delegate("Expr1"))
+	p.Define("Expr2",true,parser.Pfunc(d_expr2_ifelse))
 	
 	
 	p.Define("Expr3",false,parser.Delegate("Expr2"))

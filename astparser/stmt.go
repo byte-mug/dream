@@ -153,6 +153,13 @@ func d_stmt_cond(p *parser.Parser,tokens *scanlist.Element, left interface{}) pa
 	return res
 }
 
+var stmt_semicolon = require(';')
+func d_stmt_semicolon(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := stmt_semicolon.Parse(p,tokens,left)
+	if res.Ok() { res.Data = &SNoop{tokens.Pos} }
+	return res
+}
+
 
 func RegisterStmt(p *parser.Parser) {
 	p.Define("Decl",false,parser.Pfunc(d_decl_myvar))
@@ -161,6 +168,7 @@ func RegisterStmt(p *parser.Parser) {
 	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_print))
 	p.Define("StmtSub",true,parser.Pfunc(d_stmtsub_cond))
 	
+	p.Define("Stmt",false,parser.Pfunc(d_stmt_semicolon))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_cond))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_block))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_sub))

@@ -26,7 +26,6 @@ package values
 import "strconv"
 import "fmt"
 import "unsafe"
-import "sync"
 
 type Type uint
 
@@ -37,6 +36,7 @@ const (
 	T_String
 	T_Buffer
 	T_Reference
+	T_Module
 )
 
 type Scalar interface{
@@ -57,9 +57,6 @@ type ScalarSlot interface{
 	Set(s Scalar)
 }
 
-type ModuleRef struct{
-	Module unsafe.Pointer // *vm.Module
-}
 type ClassLoaderRef struct{
 	ClassLoader unsafe.Pointer // *vm.ClassLoader
 }
@@ -168,13 +165,10 @@ func (s ScBuffer) Bool() bool {
 
 type ScReference struct{
 	Refid uintptr
-	//Lock sync.RWMutex
-	
-	Lock sync.Mutex
 	
 	Data interface{}
 	
-	Blessed interface{}
+	Blessed *ScModule
 }
 func AllocScReference() *ScReference {
 	r := new(ScReference)
@@ -192,14 +186,43 @@ func (r *ScReference) String() string {
 	case *Scalar: t = "SCALAR"
 	case *AV: t = "ARRAY"
 	case *HV: t = "HASH"
-	case ModuleRef: t = "CLASS"
 	case ClassLoaderRef: t = "CLASSLOADER"
 	}
-	if b := r.Blessed; b!=nil { c = fmt.Sprintf("@%v",b) }
-	return fmt.Sprintf("%s(0x%x)%s",t,r.Refid,c)
+	if b := r.Blessed; b!=nil { c = fmt.Sprintf("%v=",b) }
+	return fmt.Sprintf("%s%s(0x%x)",c,t,r.Refid)
 }
 func (r *ScReference) Bytes() []byte { return []byte(r.String()) }
 func (r *ScReference) AppendTo(prefix []byte) []byte { return append(prefix,r.String()...) }
 func (r *ScReference) Less(s Scalar) bool { return r.Refid < s.(*ScReference).Refid }
 func (*ScReference) Bool() bool { return true }
+
+
+type ScModule struct{
+	Name string
+	DisplayName string
+	Clid uintptr
+	ClassLoader interface{} // *vm.ClassLoader
+	ModuleObject interface{}// *vm.Module or nil
+}
+
+func (r *ScModule) Type() Type { return T_Module }
+func (r *ScModule) IsFloat() bool { return false }
+func (r *ScModule) Integer() int64 { return 1 }
+func (r *ScModule) Float() float64 { return 1 }
+func (*ScModule) IsBytes() bool { return false }
+func (r *ScModule) String() string { return r.DisplayName }
+func (r *ScModule) Bytes() []byte { return []byte(r.String()) }
+func (r *ScModule) AppendTo(prefix []byte) []byte { return append(prefix,r.String()...) }
+func (r *ScModule) Less(s Scalar) bool {
+	o := s.(*ScModule)
+	if r.Clid != o.Clid { return r.Clid < o.Clid }
+	return r.Name < o.Name
+}
+func (*ScModule) Bool() bool { return true }
+
+func AllocNewScModule(n string,clid uintptr,cl interface{}) *ScModule {
+	dn := n
+	if clid!=0 { dn += fmt.Sprintf("<0x%x>",clid) }
+	return &ScModule{n,dn,clid,cl,nil}
+}
 

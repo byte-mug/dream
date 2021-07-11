@@ -39,6 +39,13 @@ func literal(v values.Scalar, reg int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) { ts.RS.SRegs[reg] = v }
 }
 
+func module(name string, reg int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		v := ts.RS.Proc.GetCl().GetModule(name)
+		ts.RS.SRegs[reg] = v
+	}
+}
+
 type slotLoader func(ts *vm.ThreadState) values.ScalarSlot
 
 func load_global(n string, reg int) vm.InsOp {

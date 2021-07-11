@@ -359,6 +359,10 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 		reg = alloc.GetScTarget(sth)
 		ops = append(ops,literal(values.ScString(t),reg))
 		alloc.PutScTarget(sth,reg)
+	case *astparser.EModule:
+		reg = alloc.GetScTarget(sth)
+		ops = append(ops,module(t.Name,reg))
+		alloc.PutScTarget(sth,reg)
 	case *astparser.EScalar:
 		if str,ok := t.Name.(string); ok {
 			if reg,ok = alloc.GetScDefined(str); ok { return }
@@ -476,6 +480,40 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 		alloc.PutArTarget(ScDiscard,treg)
 		ops = append(ops,scratch_create_hash_ref(treg,reg))
 		alloc.PutScTarget(sth,reg)
+	case *astparser.EExIfElse:
+		if sth==ScDiscard {
+			reg = -1
+			o1,r1 := ScCompile(alloc,t.Cond,ScAny)
+			alloc.PutScTarget(ScDiscard,r1)
+			o2,_ := ScCompile(alloc,t.Then,ScDiscard)
+			o3,_ := ScCompile(alloc,t.Else,ScDiscard)
+			ops = append(o1,jump_unless(len(o2)+1,r1))
+			ops = append(ops,o2...)
+			ops = append(ops,jump(len(o3)))
+			ops = append(ops,o3...)
+		} else {
+			o1,r1 := ScCompile(alloc,t.Cond,ScAny)
+			alloc.PutScTarget(ScDiscard,r1)
+			
+			reg = alloc.GetScTarget(sth)
+			
+			o2,r2 := ScCompile(alloc,t.Then,ScTH(reg))
+			o3,r3 := ScCompile(alloc,t.Else,ScTH(reg))
+			
+			if r2!=reg {
+				o2 = append(o2,scalar_move(r2,reg))
+				alloc.PutScTarget(ScDiscard,r2)
+			}
+			if r3!=reg {
+				o3 = append(o3,scalar_move(r3,reg))
+				alloc.PutScTarget(ScDiscard,r3)
+			}
+			
+			ops = append(o1,jump_unless(len(o2)+1,r1))
+			ops = append(ops,o2...)
+			ops = append(ops,jump(len(o3)))
+			ops = append(ops,o3...)
+		}
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
@@ -614,6 +652,40 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 			ops = append(ops,arConcatElem(alloc,subex,reg)...)
 		}
 		alloc.PutArTarget(sth,reg)
+	case *astparser.AExIfElse:
+		if sth==ScDiscard {
+			reg = -1
+			o1,r1 := ScCompile(alloc,t.Cond,ScAny)
+			alloc.PutScTarget(ScDiscard,r1)
+			o2,_ := ArCompile(alloc,t.Then,ScDiscard)
+			o3,_ := ArCompile(alloc,t.Else,ScDiscard)
+			ops = append(o1,jump_unless(len(o2)+1,r1))
+			ops = append(ops,o2...)
+			ops = append(ops,jump(len(o3)))
+			ops = append(ops,o3...)
+		} else {
+			o1,r1 := ScCompile(alloc,t.Cond,ScAny)
+			alloc.PutScTarget(ScDiscard,r1)
+			
+			reg = alloc.GetArTarget(sth)
+			
+			o2,r2 := ArCompile(alloc,t.Then,ScTH(reg))
+			o3,r3 := ArCompile(alloc,t.Else,ScTH(reg))
+			
+			if r2!=reg {
+				o2 = append(o2,move_array(r2,reg))
+				alloc.PutArTarget(ScDiscard,r2)
+			}
+			if r3!=reg {
+				o3 = append(o3,move_array(r3,reg))
+				alloc.PutArTarget(ScDiscard,r3)
+			}
+			
+			ops = append(o1,jump_unless(len(o2)+1,r1))
+			ops = append(ops,o2...)
+			ops = append(ops,jump(len(o3)))
+			ops = append(ops,o3...)
+		}
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
@@ -674,6 +746,7 @@ func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 		o1,r1 := ScCompile(alloc,t.Expr,ScAny)
 		alloc.PutScTarget(ScDiscard,r1)
 		ops = append(o1,debug(r1)) // TODO: replace debug
+	case *astparser.SNoop: // Do nothing!
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
@@ -683,6 +756,23 @@ func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 		}
 	}
 	return
+}
+
+func SubCompile(md *vm.Module, ast *astparser.MDSub) *vm.Procedure {
+	alloc := new(Alloc)
+	code := StmtCompile(alloc,ast.Body)
+	
+	return &vm.Procedure{md,alloc.RSM,code}
+}
+
+func ModCompile(cl *vm.ClassLoader, name string, ast *astparser.Module) *vm.Module {
+	md := &vm.Module{Parent: cl, Name: name}
+	md.Main = SubCompile(md,ast.Main)
+	for _,sub := range ast.Subs {
+		p := SubCompile(md,sub)
+		md.Procedures.Store(sub.Name,p)
+	}
+	return md
 }
 
 func TestFunc(ast interface{}) (res *vm.Procedure) {

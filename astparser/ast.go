@@ -47,6 +47,7 @@ const (
 	KW_unless
 	KW_while
 	KW_else
+	KW_sub
 	KW_max_
 )
 
@@ -67,6 +68,7 @@ var Keywords = scanlist.TokenDict{
 	"unless": KW_unless,
 	"while" : KW_while,
 	"else"  : KW_else,
+	"sub"   : KW_sub,
 }
 
 type hasPosition interface{
@@ -199,6 +201,20 @@ type ECreateHash struct{ // { ... }
 func (e *ECreateHash) String() string { return fmt.Sprint("newref (HASH) ",e.Elems) }
 func (e *ECreateHash) position() scanner.Position { return e.Pos }
 
+type EExIfElse struct{
+	Cond, Then, Else interface{} // $a ? $b : $c
+	Pos scanner.Position
+}
+func (e *EExIfElse) String() string  { return fmt.Sprint(e.Cond," ? ",e.Then," : ",e.Else) }
+func (e *EExIfElse) position() scanner.Position { return e.Pos }
+
+type EModule struct{
+	Name string
+	Pos scanner.Position
+}
+func (e *EModule) String() string  { return fmt.Sprint("module ",e.Name) }
+func (e *EModule) position() scanner.Position { return e.Pos }
+
 func ToScalarExpr(ast interface{}) interface{} {
 	if _,ok := ast.(hybridExpr); ok { return ast }
 	if _,ok := ast.(arrayExpr); ok {
@@ -236,6 +252,27 @@ func (e *AArAssign) String() string  { return fmt.Sprint(e.A," = ",e.B) }
 func (e *AArAssign) position() scanner.Position { return e.Pos }
 func (e *AArAssign) array() {}
 
+func flatten_one_level(args []interface{}) []interface{} {
+	i := len(args)
+	doflat := false
+	for _,arg := range args {
+		if cc,ok := arg.(*AConcat); ok {
+			doflat = true
+			i += len(cc.Elems)-1
+		}
+	}
+	if !doflat { return args }
+	nargs := make([]interface{},0,i)
+	for _,arg := range args {
+		if cc,ok := arg.(*AConcat); ok {
+			nargs = append(nargs,cc.Elems...)
+		} else {
+			nargs = append(nargs,arg)
+		}
+	}
+	return nargs
+}
+
 type AConcat struct{
 	Elems []interface{} // ($a,$b,$c,...)
 	Pos scanner.Position
@@ -243,6 +280,15 @@ type AConcat struct{
 func (e *AConcat) String() string  { return fmt.Sprint(e.Elems) }
 func (e *AConcat) position() scanner.Position { return e.Pos }
 func (e *AConcat) array() {}
+
+
+type AExIfElse struct{
+	Cond, Then, Else interface{} // $a ? @b : @c
+	Pos scanner.Position
+}
+func (e *AExIfElse) String() string  { return fmt.Sprint(e.Cond," ? ",e.Then," : ",e.Else) }
+func (e *AExIfElse) position() scanner.Position { return e.Pos }
+func (e *AExIfElse) array() {}
 
 func ToArrayExpr(ast interface{}) interface{} {
 	if _,ok := ast.(hybridExpr); ok { return ast }
@@ -289,5 +335,21 @@ type SIfElse struct{
 	Type string
 	Cond, Body, Else interface{}
 	Pos scanner.Position
+}
+type SNoop struct{
+	Pos scanner.Position
+}
+
+
+type MDSub struct{
+	Name string
+	Body interface{}
+	Pos scanner.Position
+}
+
+
+type Module struct{
+	Main *MDSub
+	Subs []*MDSub
 }
 

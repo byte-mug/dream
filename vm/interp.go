@@ -113,12 +113,68 @@ func (rs *RegisterSet) SetDispose(ts *ThreadState) {
 	*old = RegisterSet{}
 }
 
-type ClassLoader struct{
-	Modules sync.Map // map[string]*Module
+type ClassLoaderSpi interface {
+	LoadModule(cl *ClassLoader, name string) *Module
 }
+
+
+type ClassLoader struct{
+	SeeAlso[] *ClassLoader
+	
+	Modules sync.Map // map[string]*Module
+	
+	ModuleRefs sync.Map // map[string]values.Scalar
+	
+	Spi ClassLoaderSpi
+}
+
+func (cl *ClassLoader) GetModule(name string) values.Scalar {
+	if cl==nil { return values.AllocNewScModule(name,0,cl) }
+	v,ok := cl.ModuleRefs.Load(name)
+	if !ok { v,_ = cl.ModuleRefs.LoadOrStore(name,values.AllocNewScModule(name,0,cl)) }
+	return v.(values.Scalar)
+}
+func (cl *ClassLoader) findClass(name string) interface{} {
+	if cl==nil { return nil }
+	if v,_ := cl.Modules.Load(name); v!=nil { return v }
+	for _,seealso := range cl.SeeAlso {
+		if v := seealso.findClass(name); v!=nil { return v }
+	}
+	return nil
+}
+
+func FetchModule(mod *values.ScModule) (*Module,bool) {
+	if rlm,ok := mod.ModuleObject.(*Module); ok { return rlm,true }
+	cl,_ := mod.ClassLoader.(*ClassLoader)
+	if cl==nil { return nil,false }
+	if rlm,ok := cl.findClass(mod.Name).(*Module); ok {
+		mod.ModuleObject = rlm
+		return rlm,true
+	}
+	return nil,false
+}
+
+func LoadModule(mod *values.ScModule) (*Module,bool) {
+	if rlm,ok := mod.ModuleObject.(*Module); ok { return rlm,true }
+	cl,_ := mod.ClassLoader.(*ClassLoader)
+	if cl==nil { return nil,false }
+	if rlm,ok := cl.findClass(mod.Name).(*Module); ok {
+		mod.ModuleObject = rlm
+		return rlm,true
+	}
+	spi := cl.Spi
+	if spi==nil { return nil,false }
+	rlm := spi.LoadModule(cl,mod.Name)
+	if rlm==nil { return nil,false }
+	v,_ := cl.Modules.LoadOrStore(mod.Name,rlm)
+	return v.(*Module),true
+}
+
 
 type Module struct{
 	Parent *ClassLoader
+	Name string
+	Main *Procedure
 	Procedures sync.Map // map[string]*Procedure
 	
 	Scalars sync.Map // map[string]*values.Scalar
@@ -130,6 +186,11 @@ type Procedure struct{
 	Parent *Module
 	Mets RSMetrics
 	Instrs []InsOp
+}
+func (p *Procedure) GetCl() *ClassLoader {
+	pp := p.Parent
+	if pp!=nil { return nil }
+	return pp.Parent
 }
 
 func (p *Procedure) Exec(ts *ThreadState) {
