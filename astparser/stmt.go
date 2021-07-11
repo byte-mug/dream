@@ -24,6 +24,7 @@ SOFTWARE.
 package astparser
 
 import "text/scanner"
+import "github.com/byte-mug/dream/parsex"
 import "github.com/byte-mug/semiparse/scanlist"
 import "github.com/byte-mug/semiparse/parser"
 import "fmt"
@@ -35,6 +36,9 @@ var declVarList = parser.ArraySeq{
 	declVarSingle,
 	parser.ArrayStar{parser.LSeq{require(','),declVarSingle}},
 }
+var stmt_block_o = require('{')
+var stmt_block_c = require('}')
+
 
 func d_declvarlist(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	res := declVarList.Parse(p,tokens,left)
@@ -63,19 +67,21 @@ func d_decl_myvar(p *parser.Parser,tokens *scanlist.Element, left interface{}) p
 }
 
 func d_stmtsub_expr(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	if stmt_block_o.Parse(p,tokens,left).Ok() { return parsex.Jump() }
 	res := p.Match("Expr",tokens)
-	if res.Ok() { res.Data = &SExpr{res.Data,tokens.Pos} }
-	return res
-}
-func d_stmtsub_array(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
-	res := p.Match("Array",tokens)
-	if res.Ok() { res.Data = &SArray{res.Data,tokens.Pos} }
+	if !res.Ok() { return res }
+	if IsArrayExpr(res.Data) {
+		res.Data = &SArray{res.Data,tokens.Pos}
+	} else {
+		res.Data = &SExpr{res.Data,tokens.Pos}
+	}
+	
 	return res
 }
 
 var stmtsub_print = parser.LSeq{
 	parser.RequireText{"print"},
-	parser.Delegate("Expr"),
+	parsex.Snip{parser.Delegate("Expr")},
 }
 func d_stmtsub_print(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	res := stmtsub_print.Parse(p,tokens,left)
@@ -86,10 +92,10 @@ func d_stmtsub_print(p *parser.Parser,tokens *scanlist.Element, left interface{}
 
 var stmtsub_cond = parser.ArraySeq{
 	parser.OR{require(KW_if),require(KW_unless),require(KW_while)},
-	parser.Delegate("Expr"),
+	parsex.Snip{parser.Delegate("Expr")},
 }
 func d_stmtsub_cond(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
-	res := stmt_sub.Parse(p,tokens,left)
+	res := stmtsub_cond.Parse(p,tokens,left)
 	if !res.Ok() { return res }
 	r := res.Data.([]interface{})
 	res.Data = &SCond{r[0].(string),r[1],left,tokens.Pos}
@@ -97,7 +103,7 @@ func d_stmtsub_cond(p *parser.Parser,tokens *scanlist.Element, left interface{})
 }
 
 
-var stmt_sub = parser.ArraySeq{parser.Delegate("StmtSub"),require(';')}
+var stmt_sub = parser.ArraySeq{parser.Delegate("StmtSub"),parsex.Snip{require(';')}}
 func d_stmt_sub(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	res := stmt_sub.Parse(p,tokens,left)
 	if res.Ok() { res.Data = res.Data.([]interface{})[0] }
@@ -105,28 +111,29 @@ func d_stmt_sub(p *parser.Parser,tokens *scanlist.Element, left interface{}) par
 }
 
 var stmt_block = parser.ArraySeq{
-	require('{'),
-	parser.ArrayStar{parser.Delegate("Stmt")},
-	require('}'),
+	stmt_block_o,
+	parsex.ArrayBreakIf{parsex.Snip{parser.Delegate("Stmt")},stmt_block_c},
+	stmt_block_c,
 }
 func d_stmt_block(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
-	res := stmt_block.Parse(p,tokens,left)
-	if res.Ok() { res.Data = &SBlock{res.Data.([]interface{})[1].([]interface{}),tokens.Pos} }
+	res := stmt_block.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	res.Data = &SBlock{res.Data.([]interface{})[1].([]interface{}),tokens.Pos}
 	return res
 }
 
 var stmt_cond = parser.ArraySeq{
 	parser.OR{require(KW_if),require(KW_unless),require(KW_while)},
-	require('('),
-	parser.Delegate("Expr"),
-	require(')'),
-	parser.Delegate("Stmt"),
+	parsex.Snip{require('(')},
+	parsex.Snip{parser.Delegate("Expr")},
+	parsex.Snip{require(')')},
+	parsex.Snip{parser.Delegate("Stmt")},
 }
-var possibleElse = map[string]bool { "if":true, "else":true, }
+var possibleElse = map[string]bool { "if":true, "unless":true, }
 var stmt_cond_haselse = require(KW_else)
 var stmt_cond_suffix = parser.LSeq{
 	stmt_cond_haselse,
-	parser.Delegate("Stmt"),
+	parsex.Snip{parser.Delegate("Stmt")},
 }
 
 func d_stmt_cond(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
@@ -134,10 +141,12 @@ func d_stmt_cond(p *parser.Parser,tokens *scanlist.Element, left interface{}) pa
 	if !res.Ok() { return res }
 	r := res.Data.([]interface{})
 	op := r[0].(string)
+	tokens = res.Next
 	if possibleElse[op] && stmt_cond_haselse.Parse(p,tokens,nil).Ok() {
 		res2 := stmt_cond_suffix.Parse(p,tokens,nil)
 		if !res2.Ok() { return res2 }
 		res.Data = &SIfElse{op, r[2], r[4], res2.Data, tokens.Pos}
+		res.Next = res2.Next
 	} else {
 		res.Data = &SCond{op, r[2], r[4], tokens.Pos}
 	}
@@ -149,7 +158,6 @@ func RegisterStmt(p *parser.Parser) {
 	p.Define("Decl",false,parser.Pfunc(d_decl_myvar))
 	
 	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_expr))
-	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_array))
 	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_print))
 	p.Define("StmtSub",true,parser.Pfunc(d_stmtsub_cond))
 	

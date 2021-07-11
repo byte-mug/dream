@@ -47,7 +47,6 @@ const (
 	KW_unless
 	KW_while
 	KW_else
-	KW_scalar
 	KW_max_
 )
 
@@ -68,7 +67,6 @@ var Keywords = scanlist.TokenDict{
 	"unless": KW_unless,
 	"while" : KW_while,
 	"else"  : KW_else,
-	"scalar": KW_scalar,
 }
 
 type hasPosition interface{
@@ -83,6 +81,9 @@ func Position(i interface{}) (scanner.Position,bool) {
 
 type arrayExpr interface{
 	array()
+}
+type hybridExpr interface{
+	IsHybrid()
 }
 
 type ELiteral struct {
@@ -181,8 +182,35 @@ type EFromArray struct{
 	Array interface{}
 	Pos scanner.Position
 }
-func (e *EFromArray) String() string { return fmt.Sprint(e.Array) }
+func (e *EFromArray) String() string { return fmt.Sprint("scalar ",e.Array) }
 func (e *EFromArray) position() scanner.Position { return e.Pos }
+
+type ECreateArray struct{ // [ ... ]
+	Elems []interface{}
+	Pos scanner.Position
+}
+func (e *ECreateArray) String() string { return fmt.Sprint("newref (ARRAY) ",e.Elems) }
+func (e *ECreateArray) position() scanner.Position { return e.Pos }
+
+type ECreateHash struct{ // { ... }
+	Elems []interface{}
+	Pos scanner.Position
+}
+func (e *ECreateHash) String() string { return fmt.Sprint("newref (HASH) ",e.Elems) }
+func (e *ECreateHash) position() scanner.Position { return e.Pos }
+
+func ToScalarExpr(ast interface{}) interface{} {
+	if _,ok := ast.(hybridExpr); ok { return ast }
+	if _,ok := ast.(arrayExpr); ok {
+		pos,_ := Position(ast)
+		return &EFromArray{ast,pos}
+	}
+	return ast
+}
+func IsArrayExpr(ast interface{}) bool {
+	_,ok := ast.(arrayExpr)
+	return ok
+}
 
 type AArray struct{ // @..
 	Name interface{} // string | expression
@@ -208,7 +236,22 @@ func (e *AArAssign) String() string  { return fmt.Sprint(e.A," = ",e.B) }
 func (e *AArAssign) position() scanner.Position { return e.Pos }
 func (e *AArAssign) array() {}
 
+type AConcat struct{
+	Elems []interface{} // ($a,$b,$c,...)
+	Pos scanner.Position
+}
+func (e *AConcat) String() string  { return fmt.Sprint(e.Elems) }
+func (e *AConcat) position() scanner.Position { return e.Pos }
+func (e *AConcat) array() {}
 
+func ToArrayExpr(ast interface{}) interface{} {
+	if _,ok := ast.(hybridExpr); ok { return ast }
+	if _,ok := ast.(arrayExpr); !ok {
+		pos,_ := Position(ast)
+		return &AConcat{[]interface{}{ast},pos}
+	}
+	return ast
+}
 
 type SMyVars struct{ // my $a,@b,%c ...
 	Vars []interface{} // variables (as string)

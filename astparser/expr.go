@@ -24,6 +24,7 @@ SOFTWARE.
 package astparser
 
 import "strconv"
+import "github.com/byte-mug/dream/parsex"
 import "github.com/byte-mug/dream/values"
 import "text/scanner"
 import "github.com/byte-mug/semiparse/scanlist"
@@ -59,12 +60,12 @@ var vsprefix = parser.OR{
 	parser.Pfunc(d_ident),
 	require(scanner.Int),
 	parser.Delegate("Vscalar"),
-	parser.ArraySeq{require('{'), parser.Delegate("Expr"), require('}')},
+	parser.ArraySeq{require('{'), parsex.Snip{parser.Delegate("Expr")}, parsex.Snip{require('}')}},
 }
 var vssuffix = parser.OR{
 	parser.ArraySeq{require('{'), parser.Pfunc(d_ident), require('}')},
-	parser.ArraySeq{require('{'), parser.Delegate("Expr"), require('}')},
-	parser.ArraySeq{require('['), parser.Delegate("Expr"), require(']')},
+	parser.ArraySeq{require('{'), parsex.Snip{parser.Delegate("Expr")}, parsex.Snip{require('}')}},
+	parser.ArraySeq{require('['), parsex.Snip{parser.Delegate("Expr")}, parsex.Snip{require(']')}},
 }
 
 func d_vscalar(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
@@ -129,12 +130,6 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 		}
 		return sub
 	    }
-	case KW_scalar:{
-		sub := p.MatchNoLeftRecursion("Array",tokens.Next())
-		if sub.Ok() {
-			sub.Data = &EFromArray{sub.Data,tokens.Pos}
-		}
-	    }
 	case '(': /*)*/{
 		sub := p.Match("Expr",tokens.Next())
 		if sub.Result==parser.RESULT_OK {
@@ -148,6 +143,34 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 	return parser.ResultFail("Invalid Expression!",tokens.Pos)
 }
 
+var vsexlist = parsex.ArrayDelimited{
+	parsex.DelegateShort("Expr3"),
+	require(','),
+}
+
+var vsreflit = parser.OR{
+	parser.ArraySeq{require('{'),require('}')},
+	parser.ArraySeq{require('['),require(']')},
+	parser.ArraySeq{require('('),require(')')},
+	parser.ArraySeq{require('{'),parsex.Snip{vsexlist},parsex.Snip{require('}')}},
+	parser.ArraySeq{require('['),parsex.Snip{vsexlist},parsex.Snip{require(']')}},
+	parser.ArraySeq{require('('),parsex.Snip{vsexlist},parsex.Snip{require(')')}},
+}
+func d_expr0_ref(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := vsreflit.Parse(p,tokens,left)
+	if !res.Ok() { return res }
+	
+	arr := res.Data.([]interface{})
+	var elems []interface{}
+	if len(arr)==3 { elems = arr[1].([]interface{}) }
+	switch arr[0].(string) {
+	case "{":/*}*/ res.Data = &ECreateHash{elems,tokens.Pos}
+	case "[":/*]*/ res.Data = &ECreateArray{elems,tokens.Pos}
+	case "(":/*)*/ res.Data = &AConcat{elems,tokens.Pos}
+	}
+	
+	return res
+}
 
 var vbinop_simple = parser.OR{
 	require('+'),
@@ -190,7 +213,7 @@ func d_expr0_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}
 	
 	op := fmt.Sprint(res1.Data.([]interface{})...)
 	
-	res1 = p.MatchNoLeftRecursion("Expr0",tokens)
+	res1 = parsex.DoCut(p.MatchNoLeftRecursion("Expr0",tokens))
 	
 	if res1.Ok() {
 		res1.Data = &EBinop{op,left,res1.Data,pos}
@@ -206,7 +229,7 @@ var rxlit = parser.OR{
 
 var rxtrail = parser.OR{
 	parser.ArraySeq{require('='),require('~'),require(KW_m),rxlit},
-	parser.ArraySeq{require('='),require('~'),require(KW_s),rxlit,parser.Delegate("Expr0")},
+	parser.ArraySeq{require('='),require('~'),require(KW_s),rxlit,parsex.DelegateShort("Expr1")},
 }
 
 func d_expr1_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
@@ -240,7 +263,13 @@ var assign = parser.ArraySeq{require('='),parser.Delegate("Expr3")}
 func d_expr3_trailer1(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	res := assign.Parse(p,tokens,nil)
 	if !res.Ok() { return res }
-	res.Data = &EScAssign{left,res.Data.([]interface{})[1],tokens.Pos}
+	
+	if IsArrayExpr(left) {
+		res.Data = &AArAssign{left,res.Data.([]interface{})[1],tokens.Pos}
+	} else {
+		res.Data = &EScAssign{left,res.Data.([]interface{})[1],tokens.Pos}
+	}
+	
 	return res
 }
 
@@ -259,7 +288,7 @@ var vaname = parser.OR{
 	parser.Pfunc(d_ident),
 	require(scanner.Int),
 	parser.Delegate("Vscalar"),
-	parser.ArraySeq{require('{'), parser.Delegate("Expr"), require('}')},
+	parser.ArraySeq{require('{'), parsex.Snip{parser.Delegate("Expr")}, parsex.Snip{require('}')}},
 }
 var vacomplete = parser.ArraySeq{ vasigil,vaname }
 
@@ -276,18 +305,13 @@ func d_array_variable(p *parser.Parser, tokens *scanlist.Element, left interface
 	return res
 }
 
-var va_assign = parser.LSeq{require('='),parser.Delegate("Array0")}
-func d_array_assign(p *parser.Parser, tokens *scanlist.Element, left interface{}) parser.ParserResult {
-	res := va_assign.Parse(p,tokens,nil)
-	if res.Ok() { res.Data = &AArAssign{left,res.Data,tokens.Pos} }
-	return res
-}
-
 func RegisterExpr(p *parser.Parser) {
 
 	p.Define("Vscalar",false,parser.Pfunc(d_vscalar))
 	p.Define("Expr0",false,parser.Delegate("Vscalar"))
+	p.Define("Expr0",false,parser.Pfunc(d_array_variable))
 	p.Define("Expr0",false,parser.Pfunc(d_expr0))
+	p.Define("Expr0",false,parser.Pfunc(d_expr0_ref))
 	p.Define("Expr0",true,parser.Pfunc(d_expr0_trailer))
 	
 	p.Define("Expr1",false,parser.Delegate("Expr0"))
@@ -302,11 +326,5 @@ func RegisterExpr(p *parser.Parser) {
 	
 	p.Define("Expr",false,parser.Delegate("Expr3"))
 	
-	// ----------------------- Array ----------------------
-	
-	p.Define("Array0",false,parser.Pfunc(d_array_variable))
-	p.Define("Array0",true,parser.Pfunc(d_array_assign))
-	
-	p.Define("Array",false,parser.Delegate("Array0"))
 }
 

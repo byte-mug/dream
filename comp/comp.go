@@ -32,13 +32,13 @@ import "fmt"
 type intAlloc struct {
 	defined map[string]bool
 	named map[string]int
-	temp map[int]bool
+	temp map[int]int
 	count map[int]int
 }
 func (ia *intAlloc) getTemp() (int,bool) {
 	if ia.count==nil { ia.count = make(map[int]int) }
 	for r,ok := range ia.temp {
-		if !ok { continue }
+		if ok!=1 { continue }
 		if ia.count[r]!=0 { continue }
 		ia.count[r]++
 		return r,true
@@ -46,14 +46,30 @@ func (ia *intAlloc) getTemp() (int,bool) {
 	return 0,false
 }
 func (ia *intAlloc) setTemp(r int) {
-	if ia.temp==nil { ia.temp = make(map[int]bool) }
+	if ia.temp==nil { ia.temp = make(map[int]int) }
 	if ia.count==nil { ia.count = make(map[int]int) }
-	ia.temp[r] = true
+	ia.temp[r] = 1
+	ia.count[r] = 0
+}
+func (ia *intAlloc) getDangling() (int,bool) {
+	if ia.count==nil { ia.count = make(map[int]int) }
+	for r,ok := range ia.temp {
+		if ok!=2 { continue }
+		if ia.count[r]!=0 { continue }
+		ia.count[r]++
+		return r,true
+	}
+	return 0,false
+}
+func (ia *intAlloc) setDangling(r int) {
+	if ia.temp==nil { ia.temp = make(map[int]int) }
+	if ia.count==nil { ia.count = make(map[int]int) }
+	ia.temp[r] = 1
 	ia.count[r] = 0
 }
 func (ia *intAlloc) add(r, c int) {
 	if ia.count==nil { ia.count = make(map[int]int) }
-	if ia.temp[r] { ia.count[r] += c }
+	if ia.temp[r]>0 { ia.count[r] += c }
 }
 func (ia *intAlloc) getDefined(s string) (r int,ok bool) {
 	r,ok = ia.named[s]
@@ -82,6 +98,19 @@ func (a *Alloc) temp(t int) int {
 		r = a.RSM[t]
 		a.RSM[t] = r+1
 		a.mgmt[t].setTemp(r)
+	}
+	a.mgmt[t].add(r,1)
+	return r
+}
+func (a *Alloc) dangling(t int) int {
+	var r int
+	var ok bool
+	if r,ok = a.mgmt[t].getDangling(); ok {
+		return r
+	} else {
+		r = a.RSM[t]
+		a.RSM[t] = r+1
+		a.mgmt[t].setDangling(r)
 	}
 	a.mgmt[t].add(r,1)
 	return r
@@ -136,6 +165,9 @@ func (a *Alloc) GetArTarget(sth ScTH) int {
 	if sth<0 { return a.temp(vm.RSM_Array) }
 	return int(sth)
 }
+func (a *Alloc) GetArDangling() int {
+	return a.dangling(vm.RSM_Array)
+}
 func (a *Alloc) PutArTarget(sth ScTH, r int) {
 	if r<0 { return }
 	if sth == ScDiscard { a.add(vm.RSM_Array,r,-1) }
@@ -169,6 +201,10 @@ func (a *Alloc) MyDefine(s string) {
 	case '%': a.SetHsDefine(s[1:])
 	}
 }
+// -------------------------------
+type shiftFrom int
+func (shiftFrom) IsHybrid() {}
+
 // -------------------------------
 func compileArrayLoader(alloc *Alloc, name interface{}, w bool) (ops []vm.InsOp, al arrayLoader, reg int) {
 	if str,ok := name.(string); ok {
@@ -309,7 +345,12 @@ func allocNumbers(alloc *Alloc, rx *regexp.Regexp) (regs []int) {
 }
 
 func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int) {
+	ast = astparser.ToScalarExpr(ast)
 	switch t := ast.(type) {
+	case shiftFrom:
+		reg = alloc.GetScTarget(sth)
+		ops = append(ops,scratch_shift_scalar(int(t),reg))
+		alloc.PutScTarget(sth,reg)
 	case *astparser.ELiteral:
 		reg = alloc.GetScTarget(sth)
 		ops = append(ops,literal(t.Scalar,reg))
@@ -404,6 +445,37 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 		ops = append(ops,binop_assign(op,sl,r2,reg))
 		for _,oreg := range regs { alloc.PutScTarget(ScDiscard,oreg) }
 		alloc.PutScTarget(sth,reg)
+	case *astparser.EFromArray:
+		var al arrayLoader
+		var ar int = -1
+		{
+			ops,ar = ArCompile(alloc,t.Array,ScAny)
+			al = avlocal(ar)
+		}
+		reg = alloc.GetScTarget(sth)
+		ops = append(ops,length_array(al,reg))
+		alloc.PutArTarget(ScDiscard,ar)
+		alloc.PutScTarget(sth,reg)
+	case *astparser.ECreateArray:
+		reg = alloc.GetScTarget(sth)
+		treg := alloc.GetArTarget(ScAny)
+		ops = append(ops,scratch_clear(treg))
+		for _,subex := range t.Elems {
+			ops = append(ops,arConcatElem(alloc,subex,treg)...)
+		}
+		alloc.PutArTarget(ScDiscard,treg)
+		ops = append(ops,scratch_create_array_ref(treg,reg))
+		alloc.PutScTarget(sth,reg)
+	case *astparser.ECreateHash:
+		reg = alloc.GetScTarget(sth)
+		treg := alloc.GetArTarget(ScAny)
+		ops = append(ops,scratch_clear(treg))
+		for _,subex := range t.Elems {
+			ops = append(ops,arConcatElem(alloc,subex,treg)...)
+		}
+		alloc.PutArTarget(ScDiscard,treg)
+		ops = append(ops,scratch_create_hash_ref(treg,reg))
+		alloc.PutScTarget(sth,reg)
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
@@ -445,11 +517,42 @@ func arAssign(alloc *Alloc, targ, src interface{}, sth ScTH) (ops []vm.InsOp, re
 			alloc.PutArTarget(sth,reg)
 		}
 	case *astparser.AHash:
-		o1,al,r1 := compileHashLoader(alloc,t.Name,false)
-		ops,reg = ArCompile(alloc,src,sth.DeferDiscard())
-		ops = append(ops,o1...)
-		ops = append(ops,hash_from_array(al,reg))
-		alloc.PutScTarget(ScDiscard,r1)
+		o1,al,r1 := compileHashLoader(alloc,t.Name,true)
+		if ts,ok := src.(*astparser.AHash); ok {
+			o2,l2,r2 := compileHashLoader(alloc,ts.Name,false)
+			ops = append(o2,o1...)
+			ops = append(ops,hash_transfer(l2,al))
+			if sth==ScDiscard {
+				reg = -1
+			} else {
+				reg = alloc.GetArTarget(sth)
+				ops = append(ops,hash_to_array(al,reg))
+				alloc.PutArTarget(sth,reg)
+			}
+			alloc.PutScTarget(ScDiscard,r1)
+			alloc.PutScTarget(ScDiscard,r2)
+		} else {
+			ops,reg = ArCompile(alloc,src,sth.DeferDiscard())
+			ops = append(ops,o1...)
+			ops = append(ops,hash_from_array(al,reg))
+			alloc.PutScTarget(ScDiscard,r1)
+			alloc.PutArTarget(sth,reg)
+		}
+	case *astparser.AConcat:
+		ops,reg := ArCompile(alloc,src,sth.DeferDiscard())
+		treg := alloc.GetArDangling()
+		ops = append(ops,scratch_init(treg,reg))
+		for _,subex := range t.Elems {
+			if !astparser.IsArrayExpr(subex) {
+				o1,_ := scTarget(alloc,subex,shiftFrom(treg),ScDiscard)
+				ops = append(ops,o1...)
+			} else {
+				o1,_ := arAssign(alloc,subex,shiftFrom(treg),ScDiscard)
+				ops = append(ops,o1...)
+			}
+		}
+		ops = append(ops,scratch_null(treg))
+		alloc.PutArTarget(ScDiscard,treg)
 		alloc.PutArTarget(sth,reg)
 	default:
 		pos,ok := astparser.Position(targ)
@@ -461,8 +564,27 @@ func arAssign(alloc *Alloc, targ, src interface{}, sth ScTH) (ops []vm.InsOp, re
 	}
 	return
 }
+func arConcatElem(alloc *Alloc, ast interface{}, treg int) (ops []vm.InsOp) {
+	var reg int
+	if !astparser.IsArrayExpr(ast) {
+		ops,reg = ScCompile(alloc,ast,ScAny)
+		ops = append(ops,scratch_add_scalar(treg,reg))
+		alloc.PutScTarget(ScDiscard,reg)
+	} else {
+		ops,reg = ArCompile(alloc,ast,ScAny)
+		ops = append(ops,scratch_add_array(treg,reg))
+		alloc.PutArTarget(ScDiscard,reg)
+	}
+	return
+}
+
 func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int) {
+	ast = astparser.ToArrayExpr(ast)
 	switch t := ast.(type) {
+	case shiftFrom:
+		reg = alloc.GetArTarget(sth)
+		ops = append(ops,scratch_shift_array(int(t),reg))
+		alloc.PutArTarget(sth,reg)
 	case *astparser.AArray:
 		if str,ok := t.Name.(string); ok {
 			if reg,ok = alloc.GetArDefined(str); ok { return }
@@ -485,12 +607,19 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 		alloc.PutArTarget(sth,reg)
 	case *astparser.AArAssign:
 		ops,reg = arAssign(alloc,t.A,t.B,sth)
+	case *astparser.AConcat:
+		reg = alloc.GetArTarget(sth)
+		ops = append(ops,scratch_clear(reg))
+		for _,subex := range t.Elems {
+			ops = append(ops,arConcatElem(alloc,subex,reg)...)
+		}
+		alloc.PutArTarget(sth,reg)
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
-			panic(fmt.Errorf("%v : Statement not supported : %v",pos,ast))
+			panic(fmt.Errorf("%v : Expression not supported : %v",pos,ast))
 		} else {
-			panic(fmt.Errorf("Statement not supported : %v",ast))
+			panic(fmt.Errorf("Expression not supported : %v",ast))
 		}
 	}
 	return

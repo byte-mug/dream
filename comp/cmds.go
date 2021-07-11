@@ -224,6 +224,15 @@ func hash_from_array(hl hashLoader, rSrc int) vm.InsOp {
 	}
 }
 
+func hash_transfer(hs, ht hashLoader) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		hvs := hs(ts)
+		hvt := hs(ts)
+		hvt.Clear()
+		hvt.FromHV(hvs)
+	}
+}
+
 func load_array(al arrayLoader, r1, rT int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		av := al(ts)
@@ -233,6 +242,14 @@ func load_array(al arrayLoader, r1, rT int) vm.InsOp {
 		scrg[rT] = v
 	}
 }
+func length_array(al arrayLoader, rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		av := al(ts)
+		scrg := ts.RS.SRegs
+		scrg[rT] = values.ScInt(len(*av))
+	}
+}
+
 func store_array(al arrayLoader, r1, rSrc int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		av := al(ts)
@@ -272,6 +289,76 @@ func slot_hash(hl hashLoader, r1 int) slotLoader {
 		hv := hl(ts)
 		scrg := ts.RS.SRegs
 		return hv.Put(scrg[r1])
+	}
+}
+
+func scratch_clear(rs int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ARS := ts.RS.ARegs
+		ARS[rs] = ARS[rs][:0]
+	}
+}
+func scratch_null(rs int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ts.RS.ARegs[rs] = nil
+	}
+}
+func scratch_init(rs, r1 int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ARS := ts.RS.ARegs
+		ARS[rs] = ARS[r1]
+	}
+}
+func scratch_add_scalar(rs, r1 int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ARS := ts.RS.ARegs
+		v := ts.RS.SRegs[r1]
+		ARS[rs] = append(ARS[rs],v)
+	}
+}
+func scratch_add_array(rs, r1 int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ARS := ts.RS.ARegs
+		ARS[rs] = append(ARS[rs],ARS[r1]...)
+	}
+}
+
+func scratch_shift_scalar(rs, r1 int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ARS := ts.RS.ARegs
+		v := values.Null()
+		if len(ARS)>0 {
+			v = ARS[rs][0]
+			ARS[rs] = ARS[rs][1:]
+		}
+		ts.RS.SRegs[r1] = v
+	}
+}
+func scratch_shift_array(rs, r1 int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		ARS := ts.RS.ARegs
+		ARS[r1] = append(ARS[r1][:0],ARS[rs]...)
+		ARS[rs] = nil
+	}
+}
+
+func scratch_create_array_ref(rs, r1 int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		av := ts.RS.ARegs[rs]
+		nav := make(values.AV,len(av))
+		copy(nav,av)
+		sv := values.AllocScReference()
+		sv.Data = &nav
+		ts.RS.SRegs[r1] = sv
+	}
+}
+func scratch_create_hash_ref(rs, r1 int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		nhv := new(values.HV)
+		nhv.FromAV(&ts.RS.ARegs[rs])
+		sv := values.AllocScReference()
+		sv.Data = nhv
+		ts.RS.SRegs[r1] = sv
 	}
 }
 

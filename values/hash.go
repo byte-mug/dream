@@ -120,6 +120,14 @@ func (hv *HV) Clear(){
 	})
 	for _,k := range res { hv.Map.Delete(k) }
 }
+func (hv *HV) FromHV(hv2 *HV) {
+	hv2.Map.Range(func(key, value interface{}) bool{
+		slot := new(slotHV)
+		*slot = *(value.(*slotHV))
+		hv.Map.Store(key,slot)
+		return true
+	})
+}
 
 
 func Hv_Index(ref, idx Scalar) Scalar {
