@@ -150,7 +150,6 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 	if obj := d_literal(tokens); obj!=nil { return parser.ResultOk(tokens.Next(),obj) }
 	
 	switch tokens.Token {
-	//case scanner.Ident: return parser.ResultOk(tokens.Next(),&Expr{E_VAR,tokens.TokenText,nil,tokens.Pos})
 	case '+','-','!','~':{
 		sub := p.MatchNoLeftRecursion("Expr0",tokens.Next())
 		if sub.Result==parser.RESULT_OK {
@@ -168,9 +167,8 @@ func d_expr0(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser
 		return sub
 	    }
 	}
-	return parser.ResultFail("Invalid Expression!",tokens.Pos)
+	return parser.ResultFail("unexpected "+textify(tokens.Token)+", expected [+-!~]<expr> or (<expr>)!",tokens.Pos)
 }
-
 
 var vsexlist_kv = parser.ArraySeq{
 	parser.OR{
@@ -230,6 +228,30 @@ func d_expr0_ref(p *parser.Parser,tokens *scanlist.Element, left interface{}) pa
 	
 	return res
 }
+
+var va_subcall = parser.OR{
+	parser.ArraySeq{ require(scanner.Ident),require('('),require(')') },
+	parser.ArraySeq{ require(scanner.Ident),require('('),parsex.Snip{vsexlist},parsex.Snip{require(')')} },
+}
+
+func d_expr0_call(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := va_subcall.Parse(p,tokens,left)
+	if !res.Ok() { return res }
+	arr := res.Data.([]interface{})
+	
+	var args []interface{} = nil
+	
+	if len(arr)==4 {
+		args = arr[2].([]interface{})
+		// Avoid cascading *AConcat objects!
+		args = flatten_one_level(args)
+	}
+	
+	res.Data = &ESubCall{arr[0].(string),args,tokens.Pos}
+	
+	return res
+}
+
 
 var vbinop_simple = parser.OR{
 	require('+'),
@@ -393,6 +415,7 @@ func RegisterExpr(p *parser.Parser) {
 	p.Define("Expr0",false,parser.Pfunc(d_array_variable))
 	p.Define("Expr0",false,parser.Pfunc(d_expr0))
 	p.Define("Expr0",false,parser.Pfunc(d_expr0_ref))
+	p.Define("Expr0",false,parser.Pfunc(d_expr0_call))
 	p.Define("Expr0",true,parser.Pfunc(d_expr0_trailer))
 	
 	p.Define("Expr1",false,parser.Delegate("Expr0"))

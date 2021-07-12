@@ -122,18 +122,34 @@ func store_array_unref(r1,rSrc int) vm.InsOp {
 		*av = append((*av)[:0],ar[rSrc]...)
 	}
 }
+func empty_args(ts *vm.ThreadState, ip *int, ln int) {
+	ts.Args = ts.Args[:0]
+}
+func load_scalar_args(rT int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		var v values.Scalar
+		if len(ts.Args)==0 {
+			v = values.Null()
+		} else {
+			v = ts.Args[0]
+		}
+		ts.RS.SRegs[rT] = v
+	}
+}
 func load_array_args(rT int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		ar := ts.RS.ARegs
 		ar[rT] = ts.Args
 	}
 }
+/*
 func commit_array_args(rT int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		ar := ts.RS.ARegs
 		ts.Args = ar[rT]
 	}
 }
+*/
 func store_array_args(r1 int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		ar := ts.RS.ARegs
@@ -511,6 +527,14 @@ func jump_unless(off, cond int) vm.InsOp {
 		if !ts.RS.SRegs[cond].Bool() {
 			*ip += off
 		}
+	}
+}
+
+func subcall(name string) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		v,ok := ts.RS.Proc.Parent.Procedures.Load(name)
+		if !ok { panic("not found: sub "+ts.RS.Proc.Parent.Name+"::"+name) }
+		v.(*vm.Procedure).Exec(ts)
 	}
 }
 

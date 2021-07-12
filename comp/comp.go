@@ -514,6 +514,11 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 			ops = append(ops,jump(len(o3)))
 			ops = append(ops,o3...)
 		}
+	case *astparser.ESubCall:
+		ops = callCompile(alloc,ast)
+		reg = alloc.GetScTarget(sth)
+		ops = append(ops,load_scalar_args(reg))
+		alloc.PutScTarget(sth,reg)
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
@@ -686,6 +691,11 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 			ops = append(ops,jump(len(o3)))
 			ops = append(ops,o3...)
 		}
+	case *astparser.ESubCall:
+		ops = callCompile(alloc,ast)
+		reg = alloc.GetArTarget(sth)
+		ops = append(ops,load_array_args(reg))
+		alloc.PutArTarget(sth,reg)
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
@@ -693,6 +703,20 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 		} else {
 			panic(fmt.Errorf("Expression not supported : %v",ast))
 		}
+	}
+	return
+}
+
+func callCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
+	switch t := ast.(type) {
+	case *astparser.ESubCall:
+		reg := alloc.GetArTarget(ScAny)
+		ops = append(ops,scratch_clear(reg))
+		for _,subex := range t.Args {
+			ops = append(ops,arConcatElem(alloc,subex,reg)...)
+		}
+		ops = append(ops,store_array_args(reg),subcall(t.Name))
+		alloc.PutArTarget(ScDiscard,reg)
 	}
 	return
 }
@@ -761,6 +785,9 @@ func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 func SubCompile(md *vm.Module, ast *astparser.MDSub) *vm.Procedure {
 	alloc := new(Alloc)
 	code := StmtCompile(alloc,ast.Body)
+	
+	// If i have no return statement i want to have return ();
+	code = append(code,empty_args)
 	
 	return &vm.Procedure{md,alloc.RSM,code}
 }

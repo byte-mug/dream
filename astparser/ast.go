@@ -215,6 +215,15 @@ type EModule struct{
 func (e *EModule) String() string  { return fmt.Sprint("module ",e.Name) }
 func (e *EModule) position() scanner.Position { return e.Pos }
 
+type ESubCall struct{
+	Name string
+	Args []interface{}
+	Pos scanner.Position
+}
+func (e *ESubCall) String() string  { return fmt.Sprint("call ",e.Name, e.Args) }
+func (e *ESubCall) position() scanner.Position { return e.Pos }
+func (e *ESubCall) IsHybrid() {}
+
 func ToScalarExpr(ast interface{}) interface{} {
 	if _,ok := ast.(hybridExpr); ok { return ast }
 	if _,ok := ast.(arrayExpr); ok {
