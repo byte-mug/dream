@@ -26,6 +26,7 @@ package vm
 import "github.com/byte-mug/dream/values"
 import "github.com/byte-mug/dream/allocrefl"
 import "sync"
+import "unsafe"
 import "fmt"
 
 /*
@@ -132,7 +133,7 @@ type ClassLoader struct{
 func (cl *ClassLoader) GetModule(name string) values.Scalar {
 	if cl==nil { return values.AllocNewScModule(name,0,cl) }
 	v,ok := cl.ModuleRefs.Load(name)
-	if !ok { v,_ = cl.ModuleRefs.LoadOrStore(name,values.AllocNewScModule(name,0,cl)) }
+	if !ok { v,_ = cl.ModuleRefs.LoadOrStore(name,values.AllocNewScModule(name,uintptr(unsafe.Pointer(cl)),cl)) }
 	return v.(values.Scalar)
 }
 func (cl *ClassLoader) findClass(name string) interface{} {
@@ -182,6 +183,11 @@ type Module struct{
 	Arrays sync.Map // map[string]*values.AV
 	Hashes sync.Map // map[string]*values.HV
 }
+func (m *Module) InstallInLoader() *Module {
+	if m.Parent==nil { return m }
+	v,_ := m.Parent.Modules.LoadOrStore(m.Name,m)
+	return v.(*Module)
+}
 
 type Procedure struct{
 	Parent *Module
@@ -190,7 +196,7 @@ type Procedure struct{
 }
 func (p *Procedure) GetCl() *ClassLoader {
 	pp := p.Parent
-	if pp!=nil { return nil }
+	if pp==nil { return nil }
 	return pp.Parent
 }
 
