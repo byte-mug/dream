@@ -511,6 +511,26 @@ func loop(slice []vm.InsOp) vm.InsOp {
 	}
 }
 
+func runsecdefer(ts *vm.ThreadState,rT int) {
+	rec := recover()
+	v := values.Null()
+	if rec!=nil {
+		v = values.ForceTrue(values.ScString(fmt.Sprint(rec)))
+	}
+	ts.RS.SRegs[rT] = v
+}
+func runsec(ts *vm.ThreadState,rT int, slice []vm.InsOp) {
+	defer runsecdefer(ts,rT)
+	ts.RunSlice(slice)
+}
+
+func eval(rT int, slice []vm.InsOp) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		runsec(ts,rT,slice)
+		if (ts.Flags & (vm.TSF_Last|vm.TSF_Return))!=0 { *ip = ln }
+	}
+}
+
 // for $sr (@ar) {slice}
 func loop_for_s(ar, sr int, slice []vm.InsOp) vm.InsOp {
 	return loop_for(avlocal(ar),sr,slice)
@@ -559,6 +579,13 @@ func subcall(name string) vm.InsOp {
 		v.(*vm.Procedure).Exec(ts)
 	}
 }
+func subcallgo(name string) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		v,ok := ts.RS.Proc.Parent.Procedures.Load(name)
+		if !ok { panic("not found: sub "+ts.RS.Proc.Parent.Name+"::"+name) }
+		ts.GoExec(v.(*vm.Procedure))
+	}
+}
 
 func modcall(r1 int, name string) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
@@ -570,5 +597,18 @@ func modcall(r1 int, name string) vm.InsOp {
 		v,ok := mod2.Procedures.Load(name)
 		if !ok { panic("not found: sub "+mod2.Name+"::"+name) }
 		v.(*vm.Procedure).Exec(ts)
+	}
+}
+
+func modcallgo(r1 int, name string) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		sc := ts.RS.SRegs[r1]
+		mod := values.GetScModule(sc)
+		if mod==nil { panic("Invalid module!") }
+		mod2,ok := vm.FetchModule(mod)
+		if !ok { panic("Module not fond: "+mod.String()) }
+		v,ok := mod2.Procedures.Load(name)
+		if !ok { panic("not found: sub "+mod2.Name+"::"+name) }
+		ts.GoExec(v.(*vm.Procedure))
 	}
 }

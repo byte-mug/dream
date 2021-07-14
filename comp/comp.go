@@ -519,11 +519,15 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 			ops = append(ops,jump(len(o3)))
 			ops = append(ops,o3...)
 		}
-	case *astparser.ESubCall:
-	case *astparser.EObjCall:
-		ops = callCompile(alloc,ast)
+	case *astparser.ESubCall,*astparser.EObjCall:
+		ops = callCompile(alloc,ast,false)
 		reg = alloc.GetScTarget(sth)
 		ops = append(ops,load_scalar_args(reg))
+		alloc.PutScTarget(sth,reg)
+	case *astparser.EGoFunction:
+		ops = callCompile(alloc,t.Call,true)
+		reg = alloc.GetScTarget(sth)
+		ops = append(ops,literal(values.Null(),reg))
 		alloc.PutScTarget(sth,reg)
 	default:
 		pos,ok := astparser.Position(ast)
@@ -714,11 +718,15 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 			ops = append(ops,jump(len(o3)))
 			ops = append(ops,o3...)
 		}
-	case *astparser.ESubCall:
-	case *astparser.EObjCall:
-		ops = callCompile(alloc,ast)
+	case *astparser.ESubCall,*astparser.EObjCall:
+		ops = callCompile(alloc,ast,false)
 		reg = alloc.GetArTarget(sth)
 		ops = append(ops,load_array_args(reg))
+		alloc.PutArTarget(sth,reg)
+	case *astparser.EGoFunction:
+		ops = callCompile(alloc,t.Call,true)
+		reg = alloc.GetArTarget(sth)
+		ops = append(ops,scratch_clear(reg))
 		alloc.PutArTarget(sth,reg)
 	default:
 		pos,ok := astparser.Position(ast)
@@ -731,7 +739,7 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 	return
 }
 
-func callCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
+func callCompile(alloc *Alloc, ast interface{}, dogo bool) (ops []vm.InsOp) {
 	switch t := ast.(type) {
 	case *astparser.ESubCall:
 		reg := alloc.GetArTarget(ScAny)
@@ -739,7 +747,11 @@ func callCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 		for _,subex := range t.Args {
 			ops = append(ops,arConcatElem(alloc,subex,reg)...)
 		}
-		ops = append(ops,store_array_args(reg),subcall(t.Name))
+		if dogo {
+			ops = append(ops,store_array_args(reg),subcallgo(t.Name))
+		} else {
+			ops = append(ops,store_array_args(reg),subcall(t.Name))
+		}
 		alloc.PutArTarget(ScDiscard,reg)
 	case *astparser.EObjCall:
 		reg := alloc.GetArTarget(ScAny)
@@ -749,7 +761,11 @@ func callCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 		for _,subex := range t.Args {
 			ops = append(ops,arConcatElem(alloc,subex,reg)...)
 		}
-		ops = append(ops,store_array_args(reg),modcall(r1,t.Name))
+		if dogo {
+			ops = append(ops,store_array_args(reg),modcallgo(r1,t.Name))
+		} else {
+			ops = append(ops,store_array_args(reg),modcall(r1,t.Name))
+		}
 		alloc.PutScTarget(ScDiscard,r1)
 		alloc.PutArTarget(ScDiscard,reg)
 	}
@@ -814,6 +830,16 @@ func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 		o2 := StmtCompile(alloc,t.Body)
 		ops = append(ops,loop_for(l1,tr,o2))
 		alloc.PutArTarget(ScDiscard,r1)
+	case *astparser.SEval:
+		alloc.SetScDefineImplicit("@")
+		xr,_ := alloc.GetScDefined("@")
+		o1 := StmtCompile(alloc,t.Body)
+		ops = append(ops,eval(xr,o1))
+	case *astparser.SLoopJump:
+		switch t.Op {
+		case "next": ops = append(ops,next)
+		case "last": ops = append(ops,last)
+		}
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
@@ -844,16 +870,3 @@ func ModCompile(cl *vm.ClassLoader, name string, ast *astparser.Module) *vm.Modu
 	}
 	return md
 }
-
-func TestFunc(ast interface{}) (res *vm.Procedure) {
-	res = new(vm.Procedure)
-	res.Parent = new(vm.Module)
-	
-	alloc := new(Alloc)
-	
-	res.Instrs = StmtCompile(alloc,ast)
-	res.Mets = alloc.RSM
-	
-	return
-}
-

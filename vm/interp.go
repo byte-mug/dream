@@ -26,6 +26,7 @@ package vm
 import "github.com/byte-mug/dream/values"
 import "github.com/byte-mug/dream/allocrefl"
 import "sync"
+import "fmt"
 
 /*
 This structure contains everything that is supposed to be global and thread-local.
@@ -213,4 +214,24 @@ func (ts *ThreadState) RunSlice(slice []InsOp) {
 		f(ts,&i,n)
 	}
 }
+
+func NewThreadState() (ts *ThreadState) {
+	ts = new(ThreadState)
+	return
+}
+
+func (ts *ThreadState) GoExec(p *Procedure) {
+	nts := NewThreadState()
+	nts.Args = append(nts.Args[:0],ts.Args...)
+	go nts.SafeExec(p)
+}
+func debugrecover(){
+	rec := recover()
+	if rec!=nil { fmt.Println(rec) }
+}
+func (ts *ThreadState) SafeExec(p *Procedure) {
+	defer debugrecover()
+	p.Exec(ts)
+}
+
 

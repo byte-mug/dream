@@ -49,28 +49,34 @@ const (
 	KW_else
 	KW_sub
 	KW_for
+	KW_do
+	KW_eval
+	KW_package
 	KW_max_
 )
 
 var Keywords = scanlist.TokenDict{
-	"undef" : KW_undef,
-	"and"   : KW_and,
-	"or"    : KW_or,
-	"eq"    : KW_eq,
-	"ne"    : KW_ne,
-	"lt"    : KW_lt,
-	"le"    : KW_le,
-	"gt"    : KW_gt,
-	"ge"    : KW_ge,
-	"m"     : KW_m,
-	"s"     : KW_s,
-	"my"    : KW_my,
-	"if"    : KW_if,
-	"unless": KW_unless,
-	"while" : KW_while,
-	"else"  : KW_else,
-	"sub"   : KW_sub,
-	"for"   : KW_for,
+	"undef"  : KW_undef,
+	"and"    : KW_and,
+	"or"     : KW_or,
+	"eq"     : KW_eq,
+	"ne"     : KW_ne,
+	"lt"     : KW_lt,
+	"le"     : KW_le,
+	"gt"     : KW_gt,
+	"ge"     : KW_ge,
+	"m"      : KW_m,
+	"s"      : KW_s,
+	"my"     : KW_my,
+	"if"     : KW_if,
+	"unless" : KW_unless,
+	"while"  : KW_while,
+	"else"   : KW_else,
+	"sub"    : KW_sub,
+	"for"    : KW_for,
+	"do"     : KW_do,
+	"eval"   : KW_eval,
+	"package": KW_package,
 }
 
 type hasPosition interface{
@@ -88,6 +94,9 @@ type arrayExpr interface{
 }
 type hybridExpr interface{
 	IsHybrid()
+}
+type callExpr interface{
+	isCall()
 }
 
 type ELiteral struct {
@@ -225,6 +234,7 @@ type ESubCall struct{
 func (e *ESubCall) String() string  { return fmt.Sprint("call ",e.Name, e.Args) }
 func (e *ESubCall) position() scanner.Position { return e.Pos }
 func (e *ESubCall) IsHybrid() {}
+func (e *ESubCall) isCall() {}
 
 type EObjCall struct{
 	Obj interface{}
@@ -235,6 +245,15 @@ type EObjCall struct{
 func (e *EObjCall) String() string  { return fmt.Sprint("call (",e.Obj,")->",e.Name, e.Args) }
 func (e *EObjCall) position() scanner.Position { return e.Pos }
 func (e *EObjCall) IsHybrid() {}
+func (e *EObjCall) isCall() {}
+
+type EGoFunction struct{
+	Call interface{}
+	Pos scanner.Position
+}
+func (e *EGoFunction) String() string  { return fmt.Sprint("go ",e.Call) }
+func (e *EGoFunction) position() scanner.Position { return e.Pos }
+func (e *EGoFunction) IsHybrid() {}
 
 
 func ToScalarExpr(ast interface{}) interface{} {
@@ -366,7 +385,20 @@ type SFor struct{ // for $a (@b) {...}
 	Src, Body interface{}
 	Pos scanner.Position
 }
+type SEval struct{
+	Body interface{}
+	Pos scanner.Position
+}
 
+type SLoopJump struct{
+	Op string // next | last
+	Pos scanner.Position
+}
+
+type MDPackage struct{
+	Name string
+	Pos scanner.Position
+}
 
 type MDSub struct{
 	Name string

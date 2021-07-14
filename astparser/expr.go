@@ -123,6 +123,13 @@ func d_vscalar(p *parser.Parser,tokens *scanlist.Element, left interface{}) pars
 	
 	return parser.ResultFail("Invalid Scalar Expression!",pos)
 }
+var vscalarspec = parser.LSeq{require('$'),require('@')}
+func d_vscalarspec(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := vscalarspec.Parse(p,tokens,nil)
+	if res.Ok() { res.Data = &EScalar{res.Data, tokens.Pos} }
+	return res
+}
+
 
 func d_literal(token *scanlist.Element) interface{} {
 	var lit values.Scalar = nil
@@ -375,6 +382,16 @@ func d_expr1_arrow(p *parser.Parser,tokens *scanlist.Element, left interface{}) 
 	return res
 }
 
+var suffixgo = parser.RequireText{"go"}
+
+func d_expr2_go(p *parser.Parser, tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := suffixgo.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	if _,ok := left.(callExpr); !ok { return parser.ResultFail("unexpected go",tokens.Pos) }
+	
+	res.Data = &EGoFunction{left,tokens.Pos}
+	return res
+}
 
 var exprifelse = parser.ArraySeq{
 	require('?'),
@@ -436,6 +453,7 @@ func d_array_variable(p *parser.Parser, tokens *scanlist.Element, left interface
 	if !res.Ok() { return res }
 	
 	list := res.Data.([]interface{})
+	if arr,ok := list[1].([]interface{}); ok { list[1] = arr[1] }
 	switch list[0].(string) {
 	case "@": res.Data = &AArray{list[1],tokens.Pos}
 	case "%": res.Data = &AHash{list[1],tokens.Pos}
@@ -447,11 +465,14 @@ func d_array_variable(p *parser.Parser, tokens *scanlist.Element, left interface
 func RegisterExpr(p *parser.Parser) {
 
 	p.Define("Vscalar",false,parser.Pfunc(d_vscalar))
+	p.Define("Vscalar",false,parser.Pfunc(d_vscalarspec))
 	p.Define("Expr0",false,parser.Delegate("Vscalar"))
 	p.Define("Expr0",false,parser.Pfunc(d_array_variable))
 	p.Define("Expr0",false,parser.Pfunc(d_expr0))
+	
 	p.Define("Expr0",false,parser.Pfunc(d_expr0_ref))
 	p.Define("Expr0",false,parser.Pfunc(d_expr0_call))
+	p.Define("Expr0",false,parser.Pfunc(d_expr0_module_name))
 	p.Define("Expr0",true,parser.Pfunc(d_expr0_trailer))
 	
 	p.Define("Expr1",false,parser.Delegate("Expr0"))
@@ -459,6 +480,7 @@ func RegisterExpr(p *parser.Parser) {
 	p.Define("Expr1",true,parser.Pfunc(d_expr1_arrow))
 	
 	p.Define("Expr2",false,parser.Delegate("Expr1"))
+	p.Define("Expr2",true,parser.Pfunc(d_expr2_go))
 	p.Define("Expr2",true,parser.Pfunc(d_expr2_ifelse))
 	
 	

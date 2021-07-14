@@ -70,6 +70,11 @@ func Concat(a, b Scalar) Scalar {
 	return ScBuffer(b.AppendTo(a.Bytes()))
 }
 
+func ForceTrue(a Scalar) Scalar {
+	if a.Bool() { return a }
+	return strue
+}
+
 func And(a, b Scalar) Scalar { return Bool2S(a.Bool() && b.Bool()) }
 func Or(a, b Scalar) Scalar { return Bool2S(a.Bool() && b.Bool()) }
 

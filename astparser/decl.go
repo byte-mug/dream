@@ -27,7 +27,6 @@ import "github.com/byte-mug/semiparse/scanlist"
 import "github.com/byte-mug/semiparse/parser"
 import "github.com/byte-mug/dream/parsex"
 
-
 var mdecl_sub = parser.ArraySeq{
 	require(KW_sub),
 	parsex.Snip{parser.Pfunc(d_ident)},
@@ -41,6 +40,22 @@ func d_mdecl_sub(p *parser.Parser,tokens *scanlist.Element, left interface{}) pa
 	arr := res.Data.([]interface{})
 	
 	res.Data = &MDSub{arr[1].(string),arr[2],tokens.Pos}
+	
+	return res
+}
+
+var mdecl_package = parser.ArraySeq{
+	require(KW_package),
+	parsex.Snip{parser.Pfunc(d_module_name)},
+	parsex.Snip{require(';')},
+}
+func d_mdecl_package(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := mdecl_package.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	
+	arr := res.Data.([]interface{})
+	
+	res.Data = &MDPackage{arr[1].(string),tokens.Pos}
 	
 	return res
 }
@@ -80,6 +95,7 @@ func d_module(p *parser.Parser,tokens *scanlist.Element, left interface{}) parse
 
 func RegisterModule(p *parser.Parser) {
 	p.Define("Mdecl",false,parser.Pfunc(d_mdecl_sub))
+	p.Define("Mdecl",false,parser.Pfunc(d_mdecl_package))
 	
 	p.Define("Melem",false,parser.Pfunc(d_melem_mdecl))
 	p.Define("Melem",false,parser.Delegate("Stmt"))

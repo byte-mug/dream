@@ -67,7 +67,11 @@ func d_decl_myvar(p *parser.Parser,tokens *scanlist.Element, left interface{}) p
 }
 
 func d_stmtsub_expr(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	if declMy.Parse(p,tokens,left).Ok() { return parsex.Jump() }
+	if stmtsub_print.Parse(p,tokens,left).Ok() { return parsex.Jump() }
+	if stmtsub_do.Parse(p,tokens,left).Ok() { return parsex.Jump() }
 	if stmt_block_o.Parse(p,tokens,left).Ok() { return parsex.Jump() }
+	
 	res := p.Match("Expr",tokens)
 	if !res.Ok() { return res }
 	if IsArrayExpr(res.Data) {
@@ -79,6 +83,11 @@ func d_stmtsub_expr(p *parser.Parser,tokens *scanlist.Element, left interface{})
 	return res
 }
 
+var stmtsub_do = parser.LSeq{
+	require(KW_do),
+	parsex.Snip{parser.Delegate("Stmt")},
+}
+
 var stmtsub_print = parser.LSeq{
 	parser.RequireText{"print"},
 	parsex.Snip{parser.Delegate("Expr")},
@@ -86,6 +95,16 @@ var stmtsub_print = parser.LSeq{
 func d_stmtsub_print(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	res := stmtsub_print.Parse(p,tokens,left)
 	if res.Ok() { res.Data = &SPrint{res.Data,tokens.Pos} }
+	return res
+}
+
+var stmtsub_loopjmp = parser.OR{
+	parser.RequireText{"next"},
+	parser.RequireText{"last"},
+}
+func d_stmtsub_loopjmp(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := stmtsub_loopjmp.Parse(p,tokens,left)
+	if res.Ok() { res.Data = &SLoopJump{res.Data.(string),tokens.Pos} }
 	return res
 }
 
@@ -180,7 +199,7 @@ var stmt_for2 = parser.ArraySeq{
 var stmt_for = parser.OR{stmt_for1,stmt_for2}
 
 func d_stmt_for(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
-	res := stmt_for.Parse(p,tokens,left)
+	res := stmt_for.Parse(p,tokens,nil)
 	if !res.Ok() { return res }
 	r := res.Data.([]interface{})
 	
@@ -192,6 +211,13 @@ func d_stmt_for(p *parser.Parser,tokens *scanlist.Element, left interface{}) par
 	
 	res.Data = &SFor{r[0].(string), r[2], r[4], tokens.Pos}
 	
+	return res
+}
+
+var stmt_eval = parser.LSeq{require(KW_eval),parsex.Snip{parser.Delegate("Stmt")}}
+func d_stmt_eval(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := stmt_eval.Parse(p,tokens,nil)
+	if res.Ok() { res.Data = &SEval{res.Data,tokens.Pos} }
 	return res
 }
 
@@ -207,12 +233,15 @@ func RegisterStmt(p *parser.Parser) {
 	p.Define("Decl",false,parser.Pfunc(d_decl_myvar))
 	
 	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_expr))
+	p.Define("StmtSub",false,stmtsub_do)
 	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_print))
+	p.Define("StmtSub",false,parser.Pfunc(d_stmtsub_loopjmp))
 	p.Define("StmtSub",true,parser.Pfunc(d_stmtsub_cond))
 	
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_semicolon))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_cond))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_for))
+	p.Define("Stmt",false,parser.Pfunc(d_stmt_eval))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_block))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_sub))
 	
