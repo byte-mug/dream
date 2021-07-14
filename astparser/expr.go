@@ -286,6 +286,8 @@ var vbinop = parser.OR{
 func d_expr0_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	if tokens==nil { return parser.ResultFail("EOF!",scanner.Position{}) }
 	
+	if ok,_ := parser.FastMatch(tokens,'-','>'); ok { return parsex.Jump() }
+	
 	pos := tokens.Pos
 	
 	res1 := vbinop.Parse(p,tokens,nil)
@@ -339,6 +341,40 @@ func d_expr1_trailer(p *parser.Parser,tokens *scanlist.Element, left interface{}
 	}
 	return res
 }
+
+var oparrow = parser.OR{
+	parser.ArraySeq{parser.Pfunc(d_ident),parsex.Snip{require('(')},require(')')},
+	parser.ArraySeq{parser.Pfunc(d_ident),parsex.Snip{require('(')},parsex.Snip{vsexlist},parsex.Snip{require(')')}},
+	parser.ArraySeq{require('{'), parser.Pfunc(d_ident), require('}')},
+	parser.ArraySeq{require('{'), parsex.Snip{parser.Delegate("Expr")}, parsex.Snip{require('}')}},
+	parser.ArraySeq{require('['), parsex.Snip{parser.Delegate("Expr")}, parsex.Snip{require(']')}},
+}
+
+func d_expr1_arrow(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	if tokens==nil { return parser.ResultFail("EOF!",scanner.Position{}) }
+	pos := tokens.Pos
+	var ok bool
+	
+	ok,tokens = parser.FastMatch(tokens,'-','>')
+	if !ok { return parser.ResultFail("not matched",pos) }
+	
+	res := oparrow.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	arr := res.Data.([]interface{})
+	str := arr[0].(string)
+	
+	switch str {
+	case "{":/*}*/ res.Data = &EHashScalar{left, arr[1] ,pos}
+	case "[":/*]*/ res.Data = &EArrayScalar{left, arr[1] ,pos}
+	default:
+		call := &EObjCall{left,str,nil,pos}
+		if len(arr)==4 { call.Args = arr[2].([]interface{}) }
+		res.Data = call
+	}
+	
+	return res
+}
+
 
 var exprifelse = parser.ArraySeq{
 	require('?'),
@@ -420,6 +456,7 @@ func RegisterExpr(p *parser.Parser) {
 	
 	p.Define("Expr1",false,parser.Delegate("Expr0"))
 	p.Define("Expr1",true,parser.Pfunc(d_expr1_trailer))
+	p.Define("Expr1",true,parser.Pfunc(d_expr1_arrow))
 	
 	p.Define("Expr2",false,parser.Delegate("Expr1"))
 	p.Define("Expr2",true,parser.Pfunc(d_expr2_ifelse))

@@ -226,3 +226,13 @@ func AllocNewScModule(n string,clid uintptr,cl interface{}) *ScModule {
 	return &ScModule{n,dn,clid,cl,nil}
 }
 
+func GetScModule(sc Scalar) *ScModule {
+	switch t := sc.(type) {
+	case *ScModule:
+		return t
+	case *ScReference:
+		return t.Blessed
+	}
+	return nil
+}
+

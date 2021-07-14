@@ -48,6 +48,7 @@ const (
 	KW_while
 	KW_else
 	KW_sub
+	KW_for
 	KW_max_
 )
 
@@ -69,6 +70,7 @@ var Keywords = scanlist.TokenDict{
 	"while" : KW_while,
 	"else"  : KW_else,
 	"sub"   : KW_sub,
+	"for"   : KW_for,
 }
 
 type hasPosition interface{
@@ -224,6 +226,17 @@ func (e *ESubCall) String() string  { return fmt.Sprint("call ",e.Name, e.Args) 
 func (e *ESubCall) position() scanner.Position { return e.Pos }
 func (e *ESubCall) IsHybrid() {}
 
+type EObjCall struct{
+	Obj interface{}
+	Name string
+	Args []interface{}
+	Pos scanner.Position
+}
+func (e *EObjCall) String() string  { return fmt.Sprint("call (",e.Obj,")->",e.Name, e.Args) }
+func (e *EObjCall) position() scanner.Position { return e.Pos }
+func (e *EObjCall) IsHybrid() {}
+
+
 func ToScalarExpr(ast interface{}) interface{} {
 	if _,ok := ast.(hybridExpr); ok { return ast }
 	if _,ok := ast.(arrayExpr); ok {
@@ -346,6 +359,11 @@ type SIfElse struct{
 	Pos scanner.Position
 }
 type SNoop struct{
+	Pos scanner.Position
+}
+type SFor struct{ // for $a (@b) {...}
+	Var string
+	Src, Body interface{}
 	Pos scanner.Position
 }
 

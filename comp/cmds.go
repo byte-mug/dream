@@ -122,6 +122,8 @@ func store_array_unref(r1,rSrc int) vm.InsOp {
 		*av = append((*av)[:0],ar[rSrc]...)
 	}
 }
+
+
 func empty_args(ts *vm.ThreadState, ip *int, ln int) {
 	ts.Args = ts.Args[:0]
 }
@@ -509,6 +511,26 @@ func loop(slice []vm.InsOp) vm.InsOp {
 	}
 }
 
+// for $sr (@ar) {slice}
+func loop_for_s(ar, sr int, slice []vm.InsOp) vm.InsOp {
+	return loop_for(avlocal(ar),sr,slice)
+}
+
+// for $sr (@ar) {slice}
+func loop_for(al arrayLoader, sr int, slice []vm.InsOp) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		av := *al(ts)
+		sv := &ts.RS.SRegs[sr]
+		for i,n := 0,len(av); i<n; i++ {
+			*sv = av[i]
+			ts.RunSlice(slice)
+			if (ts.Flags & vm.TSF_Last)!=0 { break }
+		}
+		ts.Flags &= ^vm.TSF_Last
+		if (ts.Flags & vm.TSF_Return)!=0 { *ip = ln }
+	}
+}
+
 func jump(off int) vm.InsOp {
 	return func(ts *vm.ThreadState, ip *int, ln int) {
 		*ip += off
@@ -538,3 +560,15 @@ func subcall(name string) vm.InsOp {
 	}
 }
 
+func modcall(r1 int, name string) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		sc := ts.RS.SRegs[r1]
+		mod := values.GetScModule(sc)
+		if mod==nil { panic("Invalid module!") }
+		mod2,ok := vm.FetchModule(mod)
+		if !ok { panic("Module not fond: "+mod.String()) }
+		v,ok := mod2.Procedures.Load(name)
+		if !ok { panic("not found: sub "+mod2.Name+"::"+name) }
+		v.(*vm.Procedure).Exec(ts)
+	}
+}

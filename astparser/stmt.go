@@ -91,14 +91,20 @@ func d_stmtsub_print(p *parser.Parser,tokens *scanlist.Element, left interface{}
 
 
 var stmtsub_cond = parser.ArraySeq{
-	parser.OR{require(KW_if),require(KW_unless),require(KW_while)},
+	parser.OR{require(KW_if),require(KW_unless),require(KW_while),require(KW_for)},
 	parsex.Snip{parser.Delegate("Expr")},
 }
 func d_stmtsub_cond(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	res := stmtsub_cond.Parse(p,tokens,left)
 	if !res.Ok() { return res }
 	r := res.Data.([]interface{})
-	res.Data = &SCond{r[0].(string),r[1],left,tokens.Pos}
+	op := r[0].(string)
+	if op=="for" {
+		res.Data = &SFor{"_",r[1],left,tokens.Pos}
+	} else {
+		res.Data = &SCond{op,r[1],left,tokens.Pos}
+	}
+	
 	return res
 }
 
@@ -153,6 +159,42 @@ func d_stmt_cond(p *parser.Parser,tokens *scanlist.Element, left interface{}) pa
 	return res
 }
 
+var stmt_for1 = parser.ArraySeq{
+	require(KW_for), // -2
+	require('$'),//-1
+	parsex.Snip{parser.Pfunc(d_ident)}, // 0
+	parsex.Snip{require('(')},
+	parsex.Snip{parser.Delegate("Expr")}, // 2
+	parsex.Snip{require(')')},
+	parsex.Snip{parser.Delegate("Stmt")}, // 4
+}
+
+var stmt_for2 = parser.ArraySeq{
+	require(KW_for), // 0 (overwritten)
+	parsex.Snip{require('(')},
+	parsex.Snip{parser.Delegate("Expr")}, // 2
+	parsex.Snip{require(')')},
+	parsex.Snip{parser.Delegate("Stmt")}, // 4
+}
+
+var stmt_for = parser.OR{stmt_for1,stmt_for2}
+
+func d_stmt_for(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	res := stmt_for.Parse(p,tokens,left)
+	if !res.Ok() { return res }
+	r := res.Data.([]interface{})
+	
+	if len(r)==7 {
+		r = r[2:]
+	} else {
+		r[0] = "_"
+	}
+	
+	res.Data = &SFor{r[0].(string), r[2], r[4], tokens.Pos}
+	
+	return res
+}
+
 var stmt_semicolon = require(';')
 func d_stmt_semicolon(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
 	res := stmt_semicolon.Parse(p,tokens,left)
@@ -170,6 +212,7 @@ func RegisterStmt(p *parser.Parser) {
 	
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_semicolon))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_cond))
+	p.Define("Stmt",false,parser.Pfunc(d_stmt_for))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_block))
 	p.Define("Stmt",false,parser.Pfunc(d_stmt_sub))
 	

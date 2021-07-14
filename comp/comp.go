@@ -160,6 +160,9 @@ func (a *Alloc) GetScDefined(s string) (int,bool) {
 func (a *Alloc) SetScDefine(s string) {
 	a.define(vm.RSM_Scalar,s,"$")
 }
+func (a *Alloc) SetScDefineImplicit(s string) {
+	a.define(vm.RSM_Scalar,s,"")
+}
 // -------------------------------
 func (a *Alloc) GetArTarget(sth ScTH) int {
 	if sth<0 { return a.temp(vm.RSM_Array) }
@@ -204,6 +207,8 @@ func (a *Alloc) MyDefine(s string) {
 // -------------------------------
 type shiftFrom int
 func (shiftFrom) IsHybrid() {}
+
+type scalarReg int
 
 // -------------------------------
 func compileArrayLoader(alloc *Alloc, name interface{}, w bool) (ops []vm.InsOp, al arrayLoader, reg int) {
@@ -515,6 +520,7 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 			ops = append(ops,o3...)
 		}
 	case *astparser.ESubCall:
+	case *astparser.EObjCall:
 		ops = callCompile(alloc,ast)
 		reg = alloc.GetScTarget(sth)
 		ops = append(ops,load_scalar_args(reg))
@@ -621,6 +627,17 @@ func arConcatElem(alloc *Alloc, ast interface{}, treg int) (ops []vm.InsOp) {
 	return
 }
 
+func arForArrayLoader(alloc *Alloc, ast interface{}, w bool) (ops []vm.InsOp, al arrayLoader, reg int) {
+	switch t := ast.(type) {
+	case *astparser.AArray:
+		return compileArrayLoader(alloc,t.Name,w)
+	default:
+		ops,reg = ArCompile(alloc,ast,ScAny)
+		al = avlocal(reg)
+	}
+	return
+}
+
 func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int) {
 	ast = astparser.ToArrayExpr(ast)
 	switch t := ast.(type) {
@@ -630,9 +647,15 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 		alloc.PutArTarget(sth,reg)
 	case *astparser.AArray:
 		if str,ok := t.Name.(string); ok {
-			if reg,ok = alloc.GetArDefined(str); ok { return }
+			if str!="_" {
+				if reg,ok = alloc.GetArDefined(str); ok { return }
+			}
 			reg = alloc.GetArTarget(sth)
-			ops = append(ops,load_array_global(str,reg))
+			if str=="_" {
+				ops = append(ops,load_array_args(reg))
+			} else {
+				ops = append(ops,load_array_global(str,reg))
+			}
 			alloc.PutArTarget(sth,reg)
 		} else {
 			o1,r1 := ScCompile(alloc,t.Name,ScAny)
@@ -692,6 +715,7 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 			ops = append(ops,o3...)
 		}
 	case *astparser.ESubCall:
+	case *astparser.EObjCall:
 		ops = callCompile(alloc,ast)
 		reg = alloc.GetArTarget(sth)
 		ops = append(ops,load_array_args(reg))
@@ -716,6 +740,17 @@ func callCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 			ops = append(ops,arConcatElem(alloc,subex,reg)...)
 		}
 		ops = append(ops,store_array_args(reg),subcall(t.Name))
+		alloc.PutArTarget(ScDiscard,reg)
+	case *astparser.EObjCall:
+		reg := alloc.GetArTarget(ScAny)
+		var r1 int
+		ops,r1 = ScCompile(alloc,t.Obj,ScAny)
+		ops = append(ops,scratch_clear(reg),scratch_add_scalar(reg,r1))
+		for _,subex := range t.Args {
+			ops = append(ops,arConcatElem(alloc,subex,reg)...)
+		}
+		ops = append(ops,store_array_args(reg),modcall(r1,t.Name))
+		alloc.PutScTarget(ScDiscard,r1)
 		alloc.PutArTarget(ScDiscard,reg)
 	}
 	return
@@ -771,6 +806,14 @@ func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 		alloc.PutScTarget(ScDiscard,r1)
 		ops = append(o1,debug(r1)) // TODO: replace debug
 	case *astparser.SNoop: // Do nothing!
+	case *astparser.SFor:
+		o1,l1,r1 := arForArrayLoader(alloc,t.Src,false)
+		ops = o1
+		alloc.SetScDefineImplicit(t.Var)
+		tr,_ := alloc.GetScDefined(t.Var)
+		o2 := StmtCompile(alloc,t.Body)
+		ops = append(ops,loop_for(l1,tr,o2))
+		alloc.PutArTarget(ScDiscard,r1)
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {
