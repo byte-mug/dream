@@ -45,6 +45,18 @@ func module(name string, reg int) vm.InsOp {
 		ts.RS.SRegs[reg] = v
 	}
 }
+func require_module(name string) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		v := ts.RS.Proc.GetCl().GetModule(name).(*values.ScModule)
+		if _,ok := vm.LoadModule(v,ts); !ok { panic("module not found: "+v.Name) }
+	}
+}
+func require_module_register(reg int) vm.InsOp {
+	return func(ts *vm.ThreadState, ip *int, ln int) {
+		v := ts.RS.SRegs[reg].(*values.ScModule)
+		if _,ok := vm.LoadModule(v,ts); !ok { panic("module not found: "+v.Name) }
+	}
+}
 
 type slotLoader func(ts *vm.ThreadState) values.ScalarSlot
 
@@ -612,3 +624,5 @@ func modcallgo(r1 int, name string) vm.InsOp {
 		ts.GoExec(v.(*vm.Procedure))
 	}
 }
+
+

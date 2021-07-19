@@ -519,7 +519,7 @@ func ScCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp,reg int)
 			ops = append(ops,jump(len(o3)))
 			ops = append(ops,o3...)
 		}
-	case *astparser.ESubCall,*astparser.EObjCall:
+	case *astparser.ESubCall,*astparser.EObjCall,*astparser.EModCall:
 		ops = callCompile(alloc,ast,false)
 		reg = alloc.GetScTarget(sth)
 		ops = append(ops,load_scalar_args(reg))
@@ -718,7 +718,7 @@ func ArCompile(alloc *Alloc, ast interface{}, sth ScTH) (ops []vm.InsOp, reg int
 			ops = append(ops,jump(len(o3)))
 			ops = append(ops,o3...)
 		}
-	case *astparser.ESubCall,*astparser.EObjCall:
+	case *astparser.ESubCall,*astparser.EObjCall,*astparser.EModCall:
 		ops = callCompile(alloc,ast,false)
 		reg = alloc.GetArTarget(sth)
 		ops = append(ops,load_array_args(reg))
@@ -758,6 +758,21 @@ func callCompile(alloc *Alloc, ast interface{}, dogo bool) (ops []vm.InsOp) {
 		var r1 int
 		ops,r1 = ScCompile(alloc,t.Obj,ScAny)
 		ops = append(ops,scratch_clear(reg),scratch_add_scalar(reg,r1))
+		for _,subex := range t.Args {
+			ops = append(ops,arConcatElem(alloc,subex,reg)...)
+		}
+		if dogo {
+			ops = append(ops,store_array_args(reg),modcallgo(r1,t.Name))
+		} else {
+			ops = append(ops,store_array_args(reg),modcall(r1,t.Name))
+		}
+		alloc.PutScTarget(ScDiscard,r1)
+		alloc.PutArTarget(ScDiscard,reg)
+	case *astparser.EModCall:
+		reg := alloc.GetArTarget(ScAny)
+		var r1 int
+		ops,r1 = ScCompile(alloc,t.Obj,ScAny)
+		ops = append(ops,scratch_clear(reg))
 		for _,subex := range t.Args {
 			ops = append(ops,arConcatElem(alloc,subex,reg)...)
 		}
@@ -840,6 +855,13 @@ func StmtCompile(alloc *Alloc, ast interface{}) (ops []vm.InsOp) {
 		case "next": ops = append(ops,next)
 		case "last": ops = append(ops,last)
 		}
+	case *astparser.SRequireStatic:
+		ops = append(ops,require_module(t.Mod))
+	case *astparser.SRequireDynamic:
+		var r1 int
+		ops,r1 = ScCompile(alloc,t.Mod,ScAny)
+		ops = append(ops,require_module_register(r1))
+		alloc.PutScTarget(ScDiscard,r1)
 	default:
 		pos,ok := astparser.Position(ast)
 		if ok {

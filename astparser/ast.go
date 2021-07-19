@@ -247,6 +247,17 @@ func (e *EObjCall) position() scanner.Position { return e.Pos }
 func (e *EObjCall) IsHybrid() {}
 func (e *EObjCall) isCall() {}
 
+type EModCall struct{
+	Obj interface{}
+	Name string
+	Args []interface{}
+	Pos scanner.Position
+}
+func (e *EModCall) String() string  { return fmt.Sprint("call (",e.Obj,")::",e.Name, e.Args) }
+func (e *EModCall) position() scanner.Position { return e.Pos }
+func (e *EModCall) IsHybrid() {}
+func (e *EModCall) isCall() {}
+
 type EGoFunction struct{
 	Call interface{}
 	Pos scanner.Position
@@ -392,6 +403,15 @@ type SEval struct{
 
 type SLoopJump struct{
 	Op string // next | last
+	Pos scanner.Position
+}
+
+type SRequireStatic struct{
+	Mod string
+	Pos scanner.Position
+}
+type SRequireDynamic struct{
+	Mod interface{} // expr
 	Pos scanner.Position
 }
 

@@ -382,6 +382,32 @@ func d_expr1_arrow(p *parser.Parser,tokens *scanlist.Element, left interface{}) 
 	return res
 }
 
+var modcall = parser.OR{
+	parser.ArraySeq{parser.Pfunc(d_ident),parsex.Snip{require('(')},require(')')},
+	parser.ArraySeq{parser.Pfunc(d_ident),parsex.Snip{require('(')},parsex.Snip{vsexlist},parsex.Snip{require(')')}},
+}
+
+func d_expr1_modcall(p *parser.Parser,tokens *scanlist.Element, left interface{}) parser.ParserResult {
+	if tokens==nil { return parser.ResultFail("EOF!",scanner.Position{}) }
+	pos := tokens.Pos
+	var ok bool
+	
+	ok,tokens = parser.FastMatch(tokens,':',':')
+	if !ok { return parser.ResultFail("not matched",pos) }
+	
+	res := modcall.Parse(p,tokens,nil)
+	if !res.Ok() { return res }
+	arr := res.Data.([]interface{})
+	str := arr[0].(string)
+	
+	call := &EModCall{left,str,nil,pos}
+	if len(arr)==4 { call.Args = arr[2].([]interface{}) }
+	res.Data = call
+	
+	return res
+}
+
+
 var suffixgo = parser.RequireText{"go"}
 
 func d_expr2_go(p *parser.Parser, tokens *scanlist.Element, left interface{}) parser.ParserResult {
@@ -478,6 +504,7 @@ func RegisterExpr(p *parser.Parser) {
 	p.Define("Expr1",false,parser.Delegate("Expr0"))
 	p.Define("Expr1",true,parser.Pfunc(d_expr1_trailer))
 	p.Define("Expr1",true,parser.Pfunc(d_expr1_arrow))
+	p.Define("Expr1",true,parser.Pfunc(d_expr1_modcall))
 	
 	p.Define("Expr2",false,parser.Delegate("Expr1"))
 	p.Define("Expr2",true,parser.Pfunc(d_expr2_go))

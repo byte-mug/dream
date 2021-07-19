@@ -144,6 +144,9 @@ func (cl *ClassLoader) findClass(name string) interface{} {
 	}
 	return nil
 }
+func (cl *ClassLoader) eraseModuleOnError(name string, failed *bool) {
+	cl.Modules.Delete(name)
+}
 
 func FetchModule(mod *values.ScModule) (*Module,bool) {
 	if rlm,ok := mod.ModuleObject.(*Module); ok { return rlm,true }
@@ -156,7 +159,8 @@ func FetchModule(mod *values.ScModule) (*Module,bool) {
 	return nil,false
 }
 
-func LoadModule(mod *values.ScModule) (*Module,bool) {
+// This function may panic!
+func LoadModule(mod *values.ScModule, ts *ThreadState) (*Module,bool) {
 	if rlm,ok := mod.ModuleObject.(*Module); ok { return rlm,true }
 	cl,_ := mod.ClassLoader.(*ClassLoader)
 	if cl==nil { return nil,false }
@@ -168,8 +172,17 @@ func LoadModule(mod *values.ScModule) (*Module,bool) {
 	if spi==nil { return nil,false }
 	rlm := spi.LoadModule(cl,mod.Name)
 	if rlm==nil { return nil,false }
-	v,_ := cl.Modules.LoadOrStore(mod.Name,rlm)
-	return v.(*Module),true
+	v,ok := cl.Modules.LoadOrStore(mod.Name,rlm)
+	if !ok {
+		failed := true
+		defer cl.eraseModuleOnError(mod.Name,&failed)
+		rlm.Main.Exec(ts)
+		failed = false
+	} else {
+		rlm = v.(*Module)
+	}
+	mod.ModuleObject = rlm
+	return rlm,true
 }
 
 

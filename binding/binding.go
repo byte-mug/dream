@@ -26,6 +26,7 @@ package binding
 //import "github.com/byte-mug/dream/values"
 import "github.com/byte-mug/dream/vm"
 import "reflect"
+import "strings"
 
 type simpleFunc func(ts *vm.ThreadState)
 
@@ -65,13 +66,38 @@ func convertTypeObject(cl *vm.ClassLoader, name string,v reflect.Value) *vm.Modu
 		p := convertFuncObj(md,v.Method(i).Interface())
 		if p==nil { continue }
 		name := t.Method(i).Name
-		md.Procedures.Store(name,p)
+		switch {
+		case strings.HasPrefix(name,"G") && len(name)>1:
+			md.Procedures.Store(name[1:],p)
+		case name=="Main":
+			md.Main = p
+		}
 	}
 	
 	return md
 }
 
+
 func CreateBindingModule(cl *vm.ClassLoader, name string,v interface{}) *vm.Module {
 	return convertTypeObject(cl,name,reflect.ValueOf(v))
+}
+
+func loadModuleCollection(cl *vm.ClassLoader, name string, v reflect.Value) {
+	if v.Kind()!=reflect.Struct { return }
+	t := v.Type()
+	for i,n := 0,t.NumField(); i<n; i++ {
+		f := t.Field(i)
+		if pkg := f.Tag.Get("module"); pkg!="" {
+			modnam := name + "::" + pkg
+			convertTypeObject(cl, modnam, v.Field(i)).InstallInLoader()
+		}
+		if pkg := f.Tag.Get("subdir"); pkg!="" {
+			modnam := name + "::" + pkg
+			loadModuleCollection(cl, modnam, v.Field(i))
+		}
+	}
+}
+func LoadBindingModuleCollection(cl *vm.ClassLoader, name string, v interface{}) {
+	loadModuleCollection(cl,name,reflect.ValueOf(v))
 }
 
